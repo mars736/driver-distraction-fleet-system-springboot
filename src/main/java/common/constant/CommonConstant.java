@@ -1,4 +1,4 @@
 package common.constant;
 
-public class CommonConstant {//
+public class CommonConstant {
 }
