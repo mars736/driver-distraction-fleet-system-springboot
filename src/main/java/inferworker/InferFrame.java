@@ -4,7 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 
 /**
- * 一帧待推理的图片，带归属信息（用于推理结果回写到正确的车/司机）。
+ * 一帧待推理的图片
  */
 @Data
 @AllArgsConstructor

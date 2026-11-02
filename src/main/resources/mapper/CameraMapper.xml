@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.CameraMapper">
+
+    <select id="listEnabled" resultType="entity.Camera">
+        SELECT * FROM camera WHERE enabled = 1
+    </select>
+
+    <select id="listAll" resultType="entity.Camera">
+        SELECT * FROM camera ORDER BY id
+    </select>
+
+    <select id="selectById" resultType="entity.Camera">
+        SELECT * FROM camera WHERE id = #{id}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO camera (vehicle_id, driver_id, stream_url, sample_interval_seconds, enabled)
+        VALUES (#{vehicleId}, #{driverId}, #{streamUrl}, #{sampleIntervalSeconds}, #{enabled})
+    </insert>
+
+    <update id="update">
+        UPDATE camera
+        SET vehicle_id = #{vehicleId},
+            driver_id = #{driverId},
+            stream_url = #{streamUrl},
+            sample_interval_seconds = #{sampleIntervalSeconds},
+            enabled = #{enabled}
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateEnabled">
+        UPDATE camera SET enabled = #{enabled} WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM camera WHERE id = #{id}
+    </delete>
+
+</mapper>

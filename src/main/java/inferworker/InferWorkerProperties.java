@@ -17,7 +17,7 @@ public class InferWorkerProperties {
     private long batchTimeoutMs = 100;
 
     /** 全局推理队列上限 */
-    private int queueCapacity = 1024;
+    private int queueCapacity = 1024;//那个线程安全的多线程的阻塞队列，当抽帧送出去的速度大于回来的速度时，队列里的元素就会一直膨胀，限制元素最大量为1024，元素满了之后就扔掉队列里最旧的一帧
 
     /** FastAPI /predict 地址 */
     private String fastapiUrl = "http://127.0.0.1:8000/predict";
