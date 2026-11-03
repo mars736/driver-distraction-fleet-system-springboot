@@ -1,7 +1,7 @@
 spring:
   application:
     name: driver-distraction-fleet-system-springboot
-  datasource:
+  datasource: #todo：后面再去配置，新建一个数据库，名字叫 driver_fleet
     url: jdbc:mysql://localhost:3306/driver_fleet?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: root
     password: 123456

@@ -7,7 +7,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * 推理 Worker 的配置，对应 application.yml 里的 infer.*。
  */
 @Data
-@ConfigurationProperties(prefix = "infer")
+@ConfigurationProperties(prefix = "infer")//仅仅指定路径，不会注册成bean，也不会被注入yml里的值
 public class InferWorkerProperties {
 
     /** 攒批帧数 */
