@@ -20,3 +20,12 @@ infer:
 
 video:
   ffmpeg-path: ffmpeg
+
+# M0 新增：JWT 密钥与有效期（HS256 要求密钥 >= 32 字节；演示用，上线前替换）
+jwt:
+  secret: driver-distraction-fleet-system-default-secret-key-1234567890
+  expire-hours: 2
+
+# M0 新增：本地上传目录，WebConfig 把它映射到 /upload/**
+file:
+  upload-dir: ./upload

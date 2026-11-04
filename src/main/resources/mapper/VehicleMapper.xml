@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.VehicleMapper">
+
+    <sql id="companyCondition">
+        <if test="companyId != null">
+            AND company_id = #{companyId}
+        </if>
+    </sql>
+
+    <select id="list" resultType="entity.Vehicle">
+        SELECT * FROM vehicle
+        <where>
+            <include refid="companyCondition"/>
+        </where>
+        ORDER BY id DESC
+        LIMIT #{offset}, #{pageSize}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM vehicle
+        <where>
+            <include refid="companyCondition"/>
+        </where>
+    </select>
+
+    <select id="selectById" resultType="entity.Vehicle">
+        SELECT * FROM vehicle WHERE id = #{id}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO vehicle (company_id, plate_no, vin, vehicle_type, rated_tonnage, purchase_date, monitor_enabled, remark)
+        VALUES (#{companyId}, #{plateNo}, #{vin}, #{vehicleType}, #{ratedTonnage}, #{purchaseDate}, #{monitorEnabled}, #{remark})
+    </insert>
+
+    <update id="update">
+        UPDATE vehicle
+        SET company_id = #{companyId},
+            plate_no = #{plateNo},
+            vin = #{vin},
+            vehicle_type = #{vehicleType},
+            rated_tonnage = #{ratedTonnage},
+            purchase_date = #{purchaseDate},
+            remark = #{remark}
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateMonitorEnabled">
+        UPDATE vehicle SET monitor_enabled = #{monitorEnabled} WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM vehicle WHERE id = #{id}
+    </delete>
+
+    <select id="countByPlateNo" resultType="int">
+        SELECT COUNT(*) FROM vehicle
+        WHERE plate_no = #{plateNo}
+        <if test="excludeId != null">
+            AND id != #{excludeId}
+        </if>
+    </select>
+
+    <select id="countByCompanyId" resultType="int">
+        SELECT COUNT(*) FROM vehicle WHERE company_id = #{companyId}
+    </select>
+
+</mapper>
