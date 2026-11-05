@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.UserMapper">
+
+    <select id="selectById" resultType="entity.User">
+        SELECT * FROM sys_user WHERE id = #{id}
+    </select>
+
+    <select id="selectByUsername" resultType="entity.User">
+        SELECT * FROM sys_user WHERE username = #{username}
+    </select>
+
+    <select id="countByUsername" resultType="int">
+        SELECT COUNT(*) FROM sys_user WHERE username = #{username}
+    </select>
+
+    <select id="countByEmployeeNo" resultType="int">
+        SELECT COUNT(*) FROM sys_user WHERE employee_no = #{employeeNo}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO sys_user
+            (username, password, name, phone, fleet_id, employee_no, role, enabled, token_version, vehicle_id)
+        VALUES
+            (#{username}, #{password}, #{name}, #{phone}, #{fleetId}, #{employeeNo},
+             #{role}, #{enabled}, #{tokenVersion}, #{vehicleId})
+    </insert>
+
+    <update id="updatePassword">
+        UPDATE sys_user
+        SET password = #{password},
+            token_version = #{tokenVersion}
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateEnabled">
+        UPDATE sys_user
+        SET enabled = #{enabled},
+            token_version = #{tokenVersion}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

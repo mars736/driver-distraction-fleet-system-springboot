@@ -20,3 +20,7 @@ infer:
 
 video:
   ffmpeg-path: ffmpeg
+
+jwt:
+  secret: ${JWT_SECRET:kskbl_0fhsufuy3trysdjnjsdsd749823hdsfh}   #jwt 密钥，用来加密/验证签名 ${JWT_SECRET}读取环境变量JWT_SECRET，如果没有就用kskbl
+  expire-ms: 7200000

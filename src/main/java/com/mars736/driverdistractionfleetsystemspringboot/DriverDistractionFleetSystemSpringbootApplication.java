@@ -4,8 +4,8 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.mybatis.spring.annotation.MapperScan;
 
-@SpringBootApplication(scanBasePackages = {"com.mars736", "common", "inferworker", "video", "camera"})
-@MapperScan("camera")
+@SpringBootApplication(scanBasePackages = {"com.mars736", "common", "inferworker", "video", "controller", "service"})
+@MapperScan("mapper")
 public class DriverDistractionFleetSystemSpringbootApplication {
 
     public static void main(String[] args) {
