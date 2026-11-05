@@ -1,11 +1,14 @@
 package entity;
 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
- * 车队，对应数据库表 fleet。整个系统只有一个公司，所以车队不再挂公司 ID。
+ * 车队实体，对应数据库表 fleet。整个系统只有一个公司，车队是唯一的组织层级。
  */
 @Data
 public class Fleet {
@@ -13,14 +16,33 @@ public class Fleet {
     /** 主键，自增 */
     private Long id;
 
+    /** 车队编号，全局唯一 */
+    @NotBlank(message = "车队编号不能为空")
+    @Size(max = 32, message = "车队编号长度不能超过 32")
+    private String fleetNo;
+
     /** 车队名称 */
+    @NotBlank(message = "车队名称不能为空")
+    @Size(max = 64, message = "车队名称长度不能超过 64")
     private String name;
+
+    /** 负责人 */
+    @Size(max = 32, message = "负责人长度不能超过 32")
+    private String manager;
+
+    /** 联系电话 */
+    @Size(max = 20, message = "联系电话长度不能超过 20")
+    private String phone;
+
+    /** 成立时间 */
+    private LocalDate establishedDate;
+
+    /** 备注 */
+    @Size(max = 255, message = "备注长度不能超过 255")
+    private String remark;
 
     /** 是否启用 */
     private Boolean enabled;
-
-    /** 备注 */
-    private String remark;
 
     private LocalDateTime createTime;
     private LocalDateTime updateTime;

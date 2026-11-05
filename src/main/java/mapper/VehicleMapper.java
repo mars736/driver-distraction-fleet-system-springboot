@@ -12,12 +12,12 @@ import java.util.List;
 @Mapper
 public interface VehicleMapper {
 
-    /** 分页列表，companyId 为空时查全部 */
-    List<Vehicle> list(@Param("companyId") Long companyId,
+    /** 分页列表，fleetId 为空时查全部 */
+    List<Vehicle> list(@Param("fleetId") Long fleetId,
                        @Param("offset") int offset,
                        @Param("pageSize") int pageSize);
 
-    long count(@Param("companyId") Long companyId);
+    long count(@Param("fleetId") Long fleetId);
 
     Vehicle selectById(Long id);
 
@@ -33,5 +33,5 @@ public interface VehicleMapper {
     int countByPlateNo(@Param("plateNo") String plateNo, @Param("excludeId") Long excludeId);
 
     /** 某车队下的车辆数，车队详情统计用 */
-    int countByCompanyId(@Param("companyId") Long companyId);
+    int countByFleetId(@Param("fleetId") Long fleetId);
 }

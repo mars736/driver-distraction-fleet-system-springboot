@@ -1,5 +1,6 @@
 package entity;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -19,7 +20,8 @@ public class User {
     /** 登录账号（全局唯一）：司机=手机号，平台管理员=admin */
     private String username;
 
-    /** 密码（BCrypt 加密后的密文，绝不存明文） */
+    /** 密码（BCrypt 加密后的密文，绝不存明文）。只允许写入，任何响应都不返回 */
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String password;
 
     /** 姓名 */

@@ -16,9 +16,6 @@ public final class CommonConstant {
     /** 平台管理员：可配置全局阈值，看全部车队 */
     public static final String ROLE_PLATFORM_ADMIN = "PLATFORM_ADMIN";
 
-    /** 车队管理员：只管本车队 */
-    public static final String ROLE_FLEET_ADMIN = "FLEET_ADMIN";
-
     /** 司机 */
     public static final String ROLE_DRIVER = "DRIVER";
 

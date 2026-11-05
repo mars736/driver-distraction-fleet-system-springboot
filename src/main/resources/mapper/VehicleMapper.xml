@@ -3,16 +3,16 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="mapper.VehicleMapper">
 
-    <sql id="companyCondition">
-        <if test="companyId != null">
-            AND company_id = #{companyId}
+    <sql id="fleetCondition">
+        <if test="fleetId != null">
+            AND fleet_id = #{fleetId}
         </if>
     </sql>
 
     <select id="list" resultType="entity.Vehicle">
         SELECT * FROM vehicle
         <where>
-            <include refid="companyCondition"/>
+            <include refid="fleetCondition"/>
         </where>
         ORDER BY id DESC
         LIMIT #{offset}, #{pageSize}
@@ -21,7 +21,7 @@
     <select id="count" resultType="long">
         SELECT COUNT(*) FROM vehicle
         <where>
-            <include refid="companyCondition"/>
+            <include refid="fleetCondition"/>
         </where>
     </select>
 
@@ -30,13 +30,13 @@
     </select>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO vehicle (company_id, plate_no, vin, vehicle_type, rated_tonnage, purchase_date, monitor_enabled, remark)
-        VALUES (#{companyId}, #{plateNo}, #{vin}, #{vehicleType}, #{ratedTonnage}, #{purchaseDate}, #{monitorEnabled}, #{remark})
+        INSERT INTO vehicle (fleet_id, plate_no, vin, vehicle_type, rated_tonnage, purchase_date, monitor_enabled, remark)
+        VALUES (#{fleetId}, #{plateNo}, #{vin}, #{vehicleType}, #{ratedTonnage}, #{purchaseDate}, #{monitorEnabled}, #{remark})
     </insert>
 
     <update id="update">
         UPDATE vehicle
-        SET company_id = #{companyId},
+        SET fleet_id = #{fleetId},
             plate_no = #{plateNo},
             vin = #{vin},
             vehicle_type = #{vehicleType},
@@ -62,8 +62,8 @@
         </if>
     </select>
 
-    <select id="countByCompanyId" resultType="int">
-        SELECT COUNT(*) FROM vehicle WHERE company_id = #{companyId}
+    <select id="countByFleetId" resultType="int">
+        SELECT COUNT(*) FROM vehicle WHERE fleet_id = #{fleetId}
     </select>
 
 </mapper>

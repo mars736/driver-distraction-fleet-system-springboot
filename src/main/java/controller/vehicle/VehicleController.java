@@ -6,11 +6,10 @@ import entity.Vehicle;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
-
 import service.vehicle.VehicleService;
 
 /**
- * 车辆 REST 接口（M0）。
+ * 车辆档案 REST 接口。
  */
 @RestController
 @RequestMapping("/api/vehicles")
@@ -20,10 +19,10 @@ public class VehicleController {
     private final VehicleService vehicleService;
 
     @GetMapping
-    public Result<PageResult<Vehicle>> list(@RequestParam(required = false) Long companyId,
+    public Result<PageResult<Vehicle>> list(@RequestParam(required = false) Long fleetId,
                                             @RequestParam(defaultValue = "1") Integer page,
                                             @RequestParam(defaultValue = "10") Integer pageSize) {
-        return Result.success(vehicleService.list(companyId, page, pageSize));
+        return Result.success(vehicleService.list(fleetId, page, pageSize));
     }
 
     @GetMapping("/{id}")

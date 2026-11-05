@@ -3,12 +3,12 @@ package service.driver;
 import common.constant.CommonConstant;
 import common.exception.BusinessException;
 import common.response.PageResult;
-import entity.Driver;
+import entity.User;
 import entity.Vehicle;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import mapper.CompanyMapper;
-import mapper.DriverMapper;
+import mapper.FleetMapper;
+import mapper.UserMapper;
 import mapper.VehicleMapper;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -17,107 +17,125 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 /**
- * 司机业务（M0）。
- * 司机同时是登录账号：密码统一 BCrypt 存储，接口响应里不会带出密码（实体上用 WRITE_ONLY 控制）。
- * 证照字段留到 §23 与 P13 有结论后再加。
+ * 司机档案业务。司机账号统一存在 sys_user 表里，用 role='DRIVER' 区分。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class DriverService {
 
-    private final DriverMapper driverMapper;
-    private final CompanyMapper companyMapper;
+    private final UserMapper userMapper;
+    private final FleetMapper fleetMapper;
     private final VehicleMapper vehicleMapper;
     private final PasswordEncoder passwordEncoder;
 
-    public PageResult<Driver> list(Long companyId, String keyword, Integer page, Integer pageSize) {
+    public PageResult<User> list(Long fleetId, String keyword, Integer page, Integer pageSize) {
         int currentPage = (page == null || page < 1) ? 1 : page;
         int size = (pageSize == null || pageSize < 1) ? 10 : Math.min(pageSize, 100);
         int offset = (currentPage - 1) * size;
 
-        List<Driver> list = driverMapper.list(companyId, keyword, offset, size);
-        long total = driverMapper.count(companyId, keyword);
+        List<User> list = userMapper.listDrivers(fleetId, keyword, offset, size);
+        long total = userMapper.countDrivers(fleetId, keyword);
         return PageResult.of(list, total, currentPage, size);
     }
 
-    public Driver getById(Long id) {
-        Driver driver = driverMapper.selectById(id);
-        if (driver == null) {
+    public User getById(Long id) {
+        User user = userMapper.selectById(id);
+        if (user == null || !CommonConstant.ROLE_DRIVER.equals(user.getRole())) {
             throw new BusinessException(404, "司机不存在");
         }
-        return driver;
+        return user;
     }
 
     @Transactional
-    public Driver create(Driver driver) {
-        if (companyMapper.selectById(driver.getCompanyId()) == null) {
-            throw new BusinessException("所属车队不存在");
+    public User create(User user) {
+        checkFleetExists(user.getFleetId());
+        if (user.getPhone() == null || user.getPhone().isBlank()) {
+            throw new BusinessException("手机号不能为空");
         }
-        if (driver.getPassword() == null || driver.getPassword().isBlank()) {
+        if (user.getPassword() == null || user.getPassword().isBlank()) {
             throw new BusinessException("密码不能为空");
         }
-        checkEmployeeNoUnique(driver.getCompanyId(), driver.getEmployeeNo(), null);
-        checkVehicleBelongsToCompany(driver.getVehicleId(), driver.getCompanyId());
-
-        driver.setPassword(passwordEncoder.encode(driver.getPassword()));
-        if (driver.getAccountStatus() == null) {
-            driver.setAccountStatus(CommonConstant.STATUS_ENABLED);
+        checkEmployeeNoUnique(user.getEmployeeNo(), null);
+        if (userMapper.countByUsername(user.getPhone()) > 0) {
+            throw new BusinessException("该手机号已注册");
         }
-        driverMapper.insert(driver);
-        log.info("新增司机 id={}, companyId={}, employeeNo={}",
-                driver.getId(), driver.getCompanyId(), driver.getEmployeeNo());
-        return driver;
+        checkVehicleBelongsToFleet(user.getVehicleId(), user.getFleetId());
+
+        user.setUsername(user.getPhone());
+        user.setPassword(passwordEncoder.encode(user.getPassword()));
+        user.setRole(CommonConstant.ROLE_DRIVER);
+        user.setEnabled(true);
+        user.setTokenVersion(0);
+        userMapper.insert(user);
+        log.info("新增司机 id={}, fleetId={}, employeeNo={}",
+                user.getId(), user.getFleetId(), user.getEmployeeNo());
+        return user;
     }
 
     @Transactional
-    public Driver update(Driver driver) {
-        Driver existing = getById(driver.getId());
-        if (companyMapper.selectById(driver.getCompanyId()) == null) {
-            throw new BusinessException("所属车队不存在");
+    public User update(User user) {
+        User existing = getById(user.getId());
+        checkFleetExists(user.getFleetId());
+        if (user.getPhone() == null || user.getPhone().isBlank()) {
+            throw new BusinessException("手机号不能为空");
         }
-        checkEmployeeNoUnique(driver.getCompanyId(), driver.getEmployeeNo(), driver.getId());
-        checkVehicleBelongsToCompany(driver.getVehicleId(), driver.getCompanyId());
+        checkEmployeeNoUnique(user.getEmployeeNo(), user.getId());
+        if (!existing.getPhone().equals(user.getPhone()) && userMapper.countByUsername(user.getPhone()) > 0) {
+            throw new BusinessException("该手机号已注册");
+        }
+        checkVehicleBelongsToFleet(user.getVehicleId(), user.getFleetId());
 
-        // 密码留空表示不修改，沿用原密文
-        if (driver.getPassword() == null || driver.getPassword().isBlank()) {
-            driver.setPassword(existing.getPassword());
+        user.setUsername(user.getPhone());
+        boolean passwordChanged = user.getPassword() != null && !user.getPassword().isBlank();
+        if (passwordChanged) {
+            user.setPassword(passwordEncoder.encode(user.getPassword()));
         } else {
-            driver.setPassword(passwordEncoder.encode(driver.getPassword()));
+            user.setPassword(existing.getPassword());
         }
-        driverMapper.update(driver);
-        return driver;
+        userMapper.updateDriverProfile(user);
+        if (passwordChanged) {
+            userMapper.updatePassword(user.getId(), user.getPassword(), existing.getTokenVersion() + 1);
+        }
+        return user;
     }
 
     @Transactional
-    public void updateAccountStatus(Long id, Integer accountStatus) {
-        getById(id);
-        driverMapper.updateAccountStatus(id, accountStatus);
+    public void updateStatus(Long id, boolean enabled) {
+        User user = getById(id);
+        userMapper.updateEnabled(id, enabled, user.getTokenVersion() + 1);
     }
 
-    /** 绑定/解绑车辆；vehicleId 传 null 表示解绑 */
     @Transactional
     public void updateVehicle(Long id, Long vehicleId) {
-        Driver driver = getById(id);
-        checkVehicleBelongsToCompany(vehicleId, driver.getCompanyId());
-        driverMapper.updateVehicleId(id, vehicleId);
+        User user = getById(id);
+        checkVehicleBelongsToFleet(vehicleId, user.getFleetId());
+        userMapper.updateVehicleId(id, vehicleId);
     }
 
     @Transactional
     public void delete(Long id) {
         getById(id);
-        driverMapper.deleteById(id);
+        userMapper.deleteById(id);
         log.info("删除司机 id={}", id);
     }
 
-    private void checkEmployeeNoUnique(Long companyId, String employeeNo, Long excludeId) {
-        if (driverMapper.countByEmployeeNo(companyId, employeeNo, excludeId) > 0) {
-            throw new BusinessException("该车队下工号已存在");
+    private void checkFleetExists(Long fleetId) {
+        if (fleetId == null || fleetMapper.selectById(fleetId) == null) {
+            throw new BusinessException("所属车队不存在");
         }
     }
 
-    /** 只能绑定本车队的车辆 */
-    private void checkVehicleBelongsToCompany(Long vehicleId, Long companyId) {
+    private void checkEmployeeNoUnique(String employeeNo, Long excludeId) {
+        if (employeeNo == null || employeeNo.isBlank()) {
+            throw new BusinessException("工号不能为空");
+        }
+        if (userMapper.countByEmployeeNoExclude(employeeNo, excludeId) > 0) {
+            throw new BusinessException("该工号已存在");
+        }
+    }
+
+    private void checkVehicleBelongsToFleet(Long vehicleId, Long fleetId) {
         if (vehicleId == null) {
             return;
         }
@@ -125,7 +143,7 @@ public class DriverService {
         if (vehicle == null) {
             throw new BusinessException("绑定的车辆不存在");
         }
-        if (!companyId.equals(vehicle.getCompanyId())) {
+        if (!fleetId.equals(vehicle.getFleetId())) {
             throw new BusinessException("不能绑定其他车队的车辆");
         }
     }

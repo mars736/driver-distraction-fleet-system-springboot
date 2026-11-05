@@ -21,7 +21,7 @@ public class Vehicle {
 
     /** 所属车队 */
     @NotNull(message = "所属车队不能为空")
-    private Long companyId;
+    private Long fleetId;
 
     /** 车牌号，全局唯一 */
     @NotBlank(message = "车牌号不能为空")

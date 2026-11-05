@@ -5,7 +5,7 @@ import common.response.PageResult;
 import entity.Vehicle;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import mapper.CompanyMapper;
+import mapper.FleetMapper;
 import mapper.VehicleMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,8 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 /**
- * 车辆业务（M0）。
- * 依赖 CompanyMapper 做"所属车队必须存在"的校验，避免产生悬空 company_id。
+ * 车辆档案业务。
  */
 @Slf4j
 @Service
@@ -22,15 +21,15 @@ import java.util.List;
 public class VehicleService {
 
     private final VehicleMapper vehicleMapper;
-    private final CompanyMapper companyMapper;
+    private final FleetMapper fleetMapper;
 
-    public PageResult<Vehicle> list(Long companyId, Integer page, Integer pageSize) {
+    public PageResult<Vehicle> list(Long fleetId, Integer page, Integer pageSize) {
         int currentPage = (page == null || page < 1) ? 1 : page;
         int size = (pageSize == null || pageSize < 1) ? 10 : Math.min(pageSize, 100);
         int offset = (currentPage - 1) * size;
 
-        List<Vehicle> list = vehicleMapper.list(companyId, offset, size);
-        long total = vehicleMapper.count(companyId);
+        List<Vehicle> list = vehicleMapper.list(fleetId, offset, size);
+        long total = vehicleMapper.count(fleetId);
         return PageResult.of(list, total, currentPage, size);
     }
 
@@ -44,7 +43,7 @@ public class VehicleService {
 
     @Transactional
     public Vehicle create(Vehicle vehicle) {
-        checkCompanyExists(vehicle.getCompanyId());
+        checkFleetExists(vehicle.getFleetId());
         if (vehicleMapper.countByPlateNo(vehicle.getPlateNo(), null) > 0) {
             throw new BusinessException("车牌号已存在");
         }
@@ -59,7 +58,7 @@ public class VehicleService {
     @Transactional
     public Vehicle update(Vehicle vehicle) {
         getById(vehicle.getId());
-        checkCompanyExists(vehicle.getCompanyId());
+        checkFleetExists(vehicle.getFleetId());
         if (vehicleMapper.countByPlateNo(vehicle.getPlateNo(), vehicle.getId()) > 0) {
             throw new BusinessException("车牌号已存在");
         }
@@ -80,8 +79,8 @@ public class VehicleService {
         log.info("删除车辆 id={}", id);
     }
 
-    private void checkCompanyExists(Long companyId) {
-        if (companyMapper.selectById(companyId) == null) {
+    private void checkFleetExists(Long fleetId) {
+        if (fleetId == null || fleetMapper.selectById(fleetId) == null) {
             throw new BusinessException("所属车队不存在");
         }
     }

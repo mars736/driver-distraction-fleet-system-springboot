@@ -26,6 +26,7 @@ public class DataInitializer implements CommandLineRunner {
     public void run(String... args) {
         if (fleetMapper.countAll() == 0) {
             Fleet fleet = new Fleet();
+            fleet.setFleetNo("FLEET-001");
             fleet.setName("默认车队");
             fleet.setEnabled(true);
             fleetMapper.insert(fleet);

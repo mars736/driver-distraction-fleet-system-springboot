@@ -10,17 +10,66 @@
         ORDER BY id
     </select>
 
-    <select id="selectById" resultType="entity.Fleet">
-        SELECT * FROM fleet WHERE id = #{id}
-    </select>
-
     <select id="countAll" resultType="int">
         SELECT COUNT(*) FROM fleet
     </select>
 
+    <sql id="keywordCondition">
+        <if test="keyword != null and keyword != ''">
+            AND (fleet_no LIKE CONCAT('%', #{keyword}, '%') OR name LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+    </sql>
+
+    <select id="list" resultType="entity.Fleet">
+        SELECT * FROM fleet
+        <where>
+            <include refid="keywordCondition"/>
+        </where>
+        ORDER BY id DESC
+        LIMIT #{offset}, #{pageSize}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM fleet
+        <where>
+            <include refid="keywordCondition"/>
+        </where>
+    </select>
+
+    <select id="selectById" resultType="entity.Fleet">
+        SELECT * FROM fleet WHERE id = #{id}
+    </select>
+
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO fleet (name, enabled, remark)
-        VALUES (#{name}, #{enabled}, #{remark})
+        INSERT INTO fleet (fleet_no, name, manager, phone, established_date, remark, enabled)
+        VALUES (#{fleetNo}, #{name}, #{manager}, #{phone}, #{establishedDate}, #{remark}, #{enabled})
     </insert>
+
+    <update id="update">
+        UPDATE fleet
+        SET fleet_no = #{fleetNo},
+            name = #{name},
+            manager = #{manager},
+            phone = #{phone},
+            established_date = #{establishedDate},
+            remark = #{remark}
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateEnabled">
+        UPDATE fleet SET enabled = #{enabled} WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM fleet WHERE id = #{id}
+    </delete>
+
+    <select id="countByFleetNo" resultType="int">
+        SELECT COUNT(*) FROM fleet
+        WHERE fleet_no = #{fleetNo}
+        <if test="excludeId != null">
+            AND id != #{excludeId}
+        </if>
+    </select>
 
 </mapper>

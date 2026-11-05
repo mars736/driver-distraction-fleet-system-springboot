@@ -41,4 +41,59 @@
         WHERE id = #{id}
     </update>
 
+    <select id="listDrivers" resultType="entity.User">
+        SELECT * FROM sys_user
+        <where>
+            role = 'DRIVER'
+            <if test="fleetId != null">
+                AND fleet_id = #{fleetId}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND (employee_no LIKE CONCAT('%', #{keyword}, '%') OR name LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+        </where>
+        ORDER BY id DESC
+        LIMIT #{offset}, #{pageSize}
+    </select>
+
+    <select id="countDrivers" resultType="long">
+        SELECT COUNT(*) FROM sys_user
+        <where>
+            role = 'DRIVER'
+            <if test="fleetId != null">
+                AND fleet_id = #{fleetId}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND (employee_no LIKE CONCAT('%', #{keyword}, '%') OR name LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+        </where>
+    </select>
+
+    <select id="countByEmployeeNoExclude" resultType="int">
+        SELECT COUNT(*) FROM sys_user
+        WHERE employee_no = #{employeeNo}
+        <if test="excludeId != null">
+            AND id != #{excludeId}
+        </if>
+    </select>
+
+    <update id="updateDriverProfile">
+        UPDATE sys_user
+        SET username = #{username},
+            name = #{name},
+            phone = #{phone},
+            fleet_id = #{fleetId},
+            employee_no = #{employeeNo},
+            vehicle_id = #{vehicleId}
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateVehicleId">
+        UPDATE sys_user SET vehicle_id = #{vehicleId} WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM sys_user WHERE id = #{id}
+    </delete>
+
 </mapper>
