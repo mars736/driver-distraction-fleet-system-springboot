@@ -24,6 +24,18 @@ public class DataInitializer implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
+        /*
+        * String... 意思是——这个方法可以接收零个、一个或多个 String 参数。编译器在底层把它当成 String[]（字符串数组）来处理。
+
+    语法对比
+    // 传统数组写法（调用方必须先构造数组）
+    public void run(String[] args) { ... }
+    runner.run(new String[] {"--debug", "--port=8080"});
+
+    // 可变参数写法（调用方直接传多个字符串，更简洁）
+    public void run(String... args) { ... }
+    runner.run("--debug", "--port=8080");  // 多个参数用逗号隔开
+    runner.run();                          // 也可以不传参数*/
         if (fleetMapper.countAll() == 0) {
             Fleet fleet = new Fleet();
             fleet.setFleetNo("FLEET-001");

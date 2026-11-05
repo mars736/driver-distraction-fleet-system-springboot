@@ -4,7 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 /**
- * 登录请求体。account 是登录账号：司机填手机号，平台管理员填 admin。
+ * 登录请求体。account 是登录账号：司机填工号，平台管理员填 admin。
  */
 @Data
 public class LoginRequest {

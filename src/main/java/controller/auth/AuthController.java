@@ -43,6 +43,23 @@ public class AuthController {
     /** 司机注册 */
     @PostMapping("/register")
     public Result<Void> register(@Valid @RequestBody RegisterRequest req) {
+        /*
+        * @Valid 是 Java Bean Validation（Bean 校验）规范里的一个触发注解。它的作用是——告诉 Spring："在把请求体绑定到这个对象之后，立刻对它做一次字段校验"。
+
+    先看 RegisterRequest.java，它的每个字段上都写了校验规则：
+
+    // RegisterRequest.java
+    @NotNull(message = "请选择所属车队")    // fleetId 不能为 null
+    private Long fleetId;
+
+    @NotBlank(message = "工号不能为空")     // employeeNo 不能为 null，也不能是空字符串
+    private String employeeNo;
+
+    @NotBlank(message = "密码不能为空")
+    private String password;
+    // ...
+    这些 @NotNull、@NotBlank 是校验规则，但它们本身不会自动生效。必须有一个触发者来执行这些规则，@Valid 就是这个触发者。*/
+        //如果校验失败，会抛出MethodArgumentNotValidException异常，被 GlobalExceptionHandler捕获，我在那里写了处理策略了的
         authService.register(req);
         return Result.success("注册成功", null);
     }

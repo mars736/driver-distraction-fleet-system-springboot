@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS fleet (
 -- 统一账号：司机和管理员共用一张表，用 role 区分
 CREATE TABLE IF NOT EXISTS sys_user (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(64) NOT NULL COMMENT '登录账号，司机=手机号，管理员=admin',
+    username VARCHAR(64) NOT NULL COMMENT '登录账号，司机=工号，管理员=admin',
     password VARCHAR(100) NOT NULL COMMENT 'BCrypt 密文',
     name VARCHAR(64) NOT NULL COMMENT '姓名',
     phone VARCHAR(20) NULL COMMENT '手机号',

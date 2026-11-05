@@ -30,6 +30,18 @@ public class AuthService {
     private final UserMapper userMapper;
     private final FleetMapper fleetMapper;
     private final PasswordEncoder passwordEncoder;
+    /*
+    * 是 Spring Security 提供的一个密码加密器接口，专门解决一个问题：密码绝对不能明文存数据库。
+
+    接口定义极其简单，只有两个方法：
+
+    public interface PasswordEncoder {
+    // 把明文密码加密成密文，存入数据库
+    String encode(CharSequence rawPassword);
+
+    // 明文 + 数据库里的密文，比对是否匹配
+    boolean matches(CharSequence rawPassword, String encodedPassword);
+}*/
     private final JwtUtil jwtUtil;
 
     /** 注册页下拉：返回平台已启用的车队 */
@@ -44,14 +56,11 @@ public class AuthService {
             throw new BusinessException("所选车队不存在或已停用");
         }
         if (userMapper.countByEmployeeNo(req.getEmployeeNo()) > 0) {
-            throw new BusinessException("该工号已存在");
-        }
-        if (userMapper.countByUsername(req.getPhone()) > 0) {
-            throw new BusinessException("该手机号已注册");
+            throw new BusinessException("该工号已注册");
         }
 
         User user = new User();
-        user.setUsername(req.getPhone());   // 司机用手机号作为登录账号
+        user.setUsername(req.getEmployeeNo());   // 司机用工号作为登录账号
         user.setPassword(passwordEncoder.encode(req.getPassword()));
         user.setName(req.getName());
         user.setPhone(req.getPhone());
@@ -72,7 +81,7 @@ public class AuthService {
         if (!Boolean.TRUE.equals(user.getEnabled())) {
             throw new BusinessException(403, "账号已被禁用");
         }
-        if (!passwordEncoder.matches(req.getPassword(), user.getPassword())) {
+        if (!passwordEncoder.matches(req.getPassword(), user.getPassword())) {// matches返回 boolean 值，判断密码是否匹配
             throw new BusinessException(400, "密码错误");
         }
         String token = jwtUtil.generateToken(user.getId(), user.getTokenVersion());
@@ -80,25 +89,28 @@ public class AuthService {
     }
 
     /** token 续期：旧 token 仍有效且账号未被禁用时，签发新 token */
+    /*有 refresh：
+        token 快过期 → 前端悄悄调 refresh → 拿到新 token → 继续用
+        → 用户无感知，体验丝滑*/
     public String refresh(RefreshTokenRequest req) {
         Claims claims;
         try {
             claims = jwtUtil.parseToken(req.getToken());
         } catch (Exception e) {
-            throw new BusinessException(401, "token 无效或已过期");
+            throw new BusinessException(401, "token 格式非法或遭篡改或已过期");
         }
-        Long userId = Long.valueOf(claims.getSubject());
+        Long userId = Long.valueOf(claims.getSubject());// 从 token 中获取用户 ID
         Integer tokenVersion = claims.get("tokenVersion", Integer.class);
         User user = userMapper.selectById(userId);
         if (user == null || !Boolean.TRUE.equals(user.getEnabled())
-                || !user.getTokenVersion().equals(tokenVersion)) {
+                || !user.getTokenVersion().equals(tokenVersion)) {//注意，用户自己改密码或者管理员禁用账号，都会导致数据库里的tokenversion+1
             throw new BusinessException(401, "token 已失效");
         }
         return jwtUtil.generateToken(user.getId(), user.getTokenVersion());
     }
 
     /** 修改密码：改完把 tokenVersion +1，旧 token 立即失效 */
-    public void changePassword(Long userId, ChangePasswordRequest req) {
+    public void changePassword(Long userId, ChangePasswordRequest req) {//userId是controller从上下文获取的
         User user = userMapper.selectById(userId);
         if (user == null) {
             throw new BusinessException(404, "用户不存在");
@@ -108,7 +120,7 @@ public class AuthService {
         }
         userMapper.updatePassword(
                 userId,
-                passwordEncoder.encode(req.getNewPassword()),
+                passwordEncoder.encode(req.getNewPassword()),// encode返回 BCrypt 算法处理后的密文
                 user.getTokenVersion() + 1
         );
     }
@@ -129,7 +141,7 @@ public class AuthService {
         vo.setRole(user.getRole());
         vo.setVehicleId(user.getVehicleId());
 
-        if (user.getFleetId() != null) {
+        if (user.getFleetId() != null) {//这里我写这么复杂是为了之后fleet表新增车牌等字段做准备
             Fleet fleet = fleetMapper.selectById(user.getFleetId());
             vo.setFleetName(fleet != null ? fleet.getName() : null);
         }

@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
 /**
  * 用户 / 司机 / 管理员账户，对应数据库表 sys_user。
  *
- * 登录账号是 username：司机注册时自动用手机号当 username，平台管理员固定为 admin。
+ * 登录账号是 username：司机注册时自动用工号当 username，平台管理员固定为 admin。
  * employee_no 是工号，全局唯一。
  */
 @Data
@@ -17,7 +17,7 @@ public class User {
     /** 主键，自增 */
     private Long id;
 
-    /** 登录账号（全局唯一）：司机=手机号，平台管理员=admin */
+    /** 登录账号（全局唯一）：司机=工号，平台管理员=admin */
     private String username;
 
     /** 密码（BCrypt 加密后的密文，绝不存明文）。只允许写入，任何响应都不返回 */

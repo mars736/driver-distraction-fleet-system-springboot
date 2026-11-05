@@ -57,12 +57,9 @@ public class DriverService {
             throw new BusinessException("密码不能为空");
         }
         checkEmployeeNoUnique(user.getEmployeeNo(), null);
-        if (userMapper.countByUsername(user.getPhone()) > 0) {
-            throw new BusinessException("该手机号已注册");
-        }
         checkVehicleBelongsToFleet(user.getVehicleId(), user.getFleetId());
 
-        user.setUsername(user.getPhone());
+        user.setUsername(user.getEmployeeNo());
         user.setPassword(passwordEncoder.encode(user.getPassword()));
         user.setRole(CommonConstant.ROLE_DRIVER);
         user.setEnabled(true);
@@ -81,12 +78,9 @@ public class DriverService {
             throw new BusinessException("手机号不能为空");
         }
         checkEmployeeNoUnique(user.getEmployeeNo(), user.getId());
-        if (!existing.getPhone().equals(user.getPhone()) && userMapper.countByUsername(user.getPhone()) > 0) {
-            throw new BusinessException("该手机号已注册");
-        }
         checkVehicleBelongsToFleet(user.getVehicleId(), user.getFleetId());
 
-        user.setUsername(user.getPhone());
+        user.setUsername(user.getEmployeeNo());
         boolean passwordChanged = user.getPassword() != null && !user.getPassword().isBlank();
         if (passwordChanged) {
             user.setPassword(passwordEncoder.encode(user.getPassword()));
