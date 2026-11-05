@@ -1,4 +1,36 @@
 package common.config;
 
-public class WebConfig {
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+/**
+ * Web 配置（M0 填充空壳）：跨域 + 静态资源映射。
+ * 静态资源这里只给 upload 目录留占位，M1 的关键帧、M2 的导出件都往这个目录落。
+ */
+@Configuration
+public class WebConfig implements WebMvcConfigurer {
+
+    /** 本地上传目录，默认项目根下的 upload（可在 application.yml 里用 file.upload-dir 覆盖） */
+    @Value("${file.upload-dir:./upload}")
+    private String uploadDir;
+
+    @Override
+    public void addCorsMappings(CorsRegistry registry) {
+        registry.addMapping("/**")
+                .allowedOriginPatterns("*")
+                .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
+                .allowedHeaders("*")
+                .maxAge(3600);
+    }
+
+    @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        // 末尾必须带 /，否则会把目录当文件解析
+        String location = uploadDir.endsWith("/") ? uploadDir : uploadDir + "/";
+        registry.addResourceHandler("/upload/**")
+                .addResourceLocations("file:" + location);
+    }
 }
