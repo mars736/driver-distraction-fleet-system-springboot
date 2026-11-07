@@ -41,15 +41,15 @@ public class SecurityConfig {
         config.setAllowedMethods(List.of("*"));//：允许任何 HTTP 方法（GET/POST/PUT/DELETE…）
         config.setAllowedHeaders(List.of("*"));//：允许任何请求头
         config.setAllowCredentials(true);//：允许带 Cookie/凭证
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();//一个「按 URL 路径提供跨域配置」的容器
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();//一个「按 URL 路径提供跨域配置」的容器，本来的话一个CorsConfiguration（）就是全局配置的容器，当然也可以一个前端传回来的路径专门设置一个cors配置
         source.registerCorsConfiguration("/**", config);//：把上面这套配置应用到所有路径
         return source;
     }
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {//HttpSecurity http是配置构建器（Builder）
         http
-            .csrf(AbstractHttpConfigurer::disable)
+            .csrf(AbstractHttpConfigurer::disable)//Cross-Site Request Forgery（跨站请求伪造），这里我没不开启这个防御，因为我们用JWT
             .cors(Customizer.withDefaults())/*启用 CORS，并且用「默认配置」。
                                             Customizer.withDefaults() 意思是「用默认方式配置」。Spring 会去找容器里的 CorsConfigurationSource Bean——就是上面那个方法返回的对象——用它来处理跨域。*/
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))//意思是服务器不创建也不使用 Session。因为我们用 JWT，每次请求都自己带 token，不需要服务器记住你是谁。这正好对应我们之前讲的「JWT 无状态」
@@ -65,6 +65,6 @@ public class SecurityConfig {
                 .anyRequest().authenticated()//：其他请求都需要认证
             )
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);//把我们的 jwtAuthFilter 插到 UsernamePasswordAuthenticationFilter 前面。后面的这个过滤器没有真的启动，只是为了方便各过滤器排队
-        return http.build();//把刚才配置的所有规则，真正组装成一个 SecurityFilterChain 对象并返回。
+        return http.build();//把刚才配置的所有规则，真正组装成一个 SecurityFilterChain 对象并返回。自动注册之后就不管了，这个配置会自动生效的
     }
 }
