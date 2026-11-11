@@ -59,6 +59,11 @@ public class InferWorker {
         listeners.add(listener);
     }
 
+    /** 业务模块关闭时注销监听器，避免继续向已关闭的处理队列提交结果。 */
+    public void removeListener(InferResultListener listener) {
+        listeners.remove(listener);
+    }
+
     private void runLoop() {
         while (running) {//检查一下running常量
             try {

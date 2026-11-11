@@ -60,3 +60,61 @@ CREATE TABLE IF NOT EXISTS vehicle (
     UNIQUE KEY uk_plate_no (plate_no),
     KEY idx_fleet_id (fleet_id)
 ) COMMENT '车辆';
+
+-- 识别元数据；source_frame_id 仅供排查，重试去重使用 source_key。
+CREATE TABLE IF NOT EXISTS recognition_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    source_key VARCHAR(36) NOT NULL COMMENT '本次采集结果的 UUID，重试时保持不变',
+    source_frame_id BIGINT NOT NULL COMMENT '进程内帧号，非数据库主键',
+    camera_id BIGINT NULL,
+    vehicle_id BIGINT NULL,
+    driver_id BIGINT NULL,
+    fleet_id BIGINT NULL,
+    captured_at DATETIME(3) NOT NULL,
+    pred INT NOT NULL COMMENT '模型原始类别索引，OOD 时不可信',
+    behavior_code VARCHAR(8) NULL COMMENT '有效类别 c0-c9，OOD/非法预测为空',
+    max_p DOUBLE NULL,
+    energy DOUBLE NULL,
+    knn_dist DOUBLE NULL,
+    ood TINYINT(1) NOT NULL,
+    participated TINYINT(1) NOT NULL COMMENT '是否参与行为判定',
+    decision_reason VARCHAR(32) NOT NULL,
+    speed_kmh DOUBLE NULL,
+    speed_status VARCHAR(16) NOT NULL COMMENT 'KNOWN / UNKNOWN',
+    key_frame_path VARCHAR(255) NULL COMMENT '仅违规触发帧保存 JPEG，相对上传目录',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_recognition_source (source_key),
+    KEY idx_recognition_vehicle_time (vehicle_id, captured_at),
+    KEY idx_recognition_driver_time (driver_id, captured_at)
+) COMMENT '识别记录';
+
+CREATE TABLE IF NOT EXISTS alert_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    recognition_id BIGINT NOT NULL,
+    camera_id BIGINT NULL,
+    vehicle_id BIGINT NOT NULL,
+    driver_id BIGINT NULL,
+    fleet_id BIGINT NULL,
+    captured_at DATETIME(3) NOT NULL,
+    behavior_code VARCHAR(8) NULL,
+    max_p DOUBLE NULL,
+    record_type VARCHAR(32) NOT NULL COMMENT 'SMS_ALERT / BACKLOG / SPEED_UNKNOWN；速度异常不作为司机违规',
+    event_count INT NOT NULL DEFAULT 0,
+    sms_status VARCHAR(40) NOT NULL COMMENT 'NOT_REQUIRED / PENDING / SENDING / SIMULATED / SENT / FAILED / SKIPPED_*',
+    status VARCHAR(16) NOT NULL DEFAULT 'OPEN' COMMENT '预留人工复核状态',
+    key_frame_path VARCHAR(255) NULL,
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_alert_recognition_type (recognition_id, record_type),
+    KEY idx_alert_vehicle_time (vehicle_id, captured_at),
+    KEY idx_alert_driver_time (driver_id, captured_at),
+    KEY idx_alert_sms (sms_status)
+) COMMENT '告警与速度未知异常';
+
+CREATE TABLE IF NOT EXISTS alert_vehicle_state (
+    vehicle_id BIGINT PRIMARY KEY,
+    state_json LONGTEXT NOT NULL COMMENT '车辆判定状态，和识别记录及告警同事务更新',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) COMMENT '告警累计与去重状态，支持应用重启恢复';
