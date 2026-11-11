@@ -74,6 +74,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/fleets/**", "/api/vehicles/**", "/api/drivers/**").hasRole("PLATFORM_ADMIN")//三个档案接口只有平台管理员能管。
                 .requestMatchers("/api/cameras", "/api/cameras/**").hasRole("PLATFORM_ADMIN")//摄像头配置的读写接口都属于管理员功能。
                 .requestMatchers("/upload/alerts", "/upload/alerts/**").denyAll()
+                .requestMatchers(HttpMethod.POST, "/api/alerts/*/reviews").hasRole("PLATFORM_ADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/alerts", "/api/alerts/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
                 .requestMatchers(HttpMethod.HEAD, "/api/alerts", "/api/alerts/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
                 .requestMatchers("/api/alerts", "/api/alerts/**").denyAll()

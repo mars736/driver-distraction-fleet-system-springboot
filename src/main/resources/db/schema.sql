@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS alert_record (
     record_type VARCHAR(32) NOT NULL COMMENT 'SMS_ALERT / BACKLOG / SPEED_UNKNOWN；速度异常不作为司机违规',
     event_count INT NOT NULL DEFAULT 0,
     sms_status VARCHAR(40) NOT NULL COMMENT 'NOT_REQUIRED / PENDING / SENDING / SIMULATED / SENT / FAILED / SKIPPED_*',
-    status VARCHAR(16) NOT NULL DEFAULT 'OPEN' COMMENT '预留人工复核状态',
+    status VARCHAR(16) NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN / CONFIRMED / REVOKED',
     key_frame_path VARCHAR(255) NULL,
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -118,3 +118,17 @@ CREATE TABLE IF NOT EXISTS alert_vehicle_state (
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) COMMENT '告警累计与去重状态，支持应用重启恢复';
+
+-- 人工处理只保存确认/撤销与历史，不回流模型、不修改识别元数据或短信投递状态。
+CREATE TABLE IF NOT EXISTS alert_review_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    alert_id BIGINT NOT NULL,
+    from_status VARCHAR(16) NOT NULL,
+    to_status VARCHAR(16) NOT NULL,
+    reason VARCHAR(500) NOT NULL,
+    operator_id BIGINT NOT NULL,
+    operator_username VARCHAR(64) NOT NULL,
+    operator_name VARCHAR(64) NOT NULL,
+    operated_at DATETIME(3) NOT NULL COMMENT '北京时间操作时间',
+    KEY idx_alert_review_time (alert_id, operated_at, id)
+) COMMENT '告警人工处理历史，操作人信息保存快照';
