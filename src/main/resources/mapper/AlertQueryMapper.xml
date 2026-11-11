@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.AlertQueryMapper">
+    <sql id="filters">
+        <where>
+            <if test="filter.ownerDriverId != null">AND a.driver_id = #{filter.ownerDriverId}</if>
+            <if test="filter.fleetId != null">AND a.fleet_id = #{filter.fleetId}</if>
+            <if test="filter.vehicleId != null">AND a.vehicle_id = #{filter.vehicleId}</if>
+            <if test="filter.driverId != null">AND a.driver_id = #{filter.driverId}</if>
+            <if test="filter.behaviorCode != null">AND a.behavior_code = #{filter.behaviorCode}</if>
+            <if test="filter.recordType != null">AND a.record_type = #{filter.recordType}</if>
+            <if test="filter.startTime != null">AND a.captured_at &gt;= #{filter.startTime}</if>
+            <if test="filter.endTime != null">AND a.captured_at &lt; #{filter.endTime}</if>
+        </where>
+    </sql>
+    <sql id="viewColumns">
+        a.*, v.plate_no, u.name AS driver_name, f.name AS fleet_name, r.speed_kmh, r.speed_status
+    </sql>
+    <sql id="viewJoins">
+        FROM alert_record a
+        LEFT JOIN vehicle v ON v.id = a.vehicle_id
+        LEFT JOIN sys_user u ON u.id = a.driver_id
+        LEFT JOIN fleet f ON f.id = a.fleet_id
+        LEFT JOIN recognition_record r ON r.id = a.recognition_id
+    </sql>
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM alert_record a <include refid="filters"/>
+    </select>
+    <select id="list" resultType="vo.alert.AlertView">
+        SELECT <include refid="viewColumns"/> <include refid="viewJoins"/>
+        <include refid="filters"/>
+        ORDER BY a.captured_at DESC, a.id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+    <select id="findAccessible" resultType="vo.alert.AlertView">
+        SELECT <include refid="viewColumns"/> <include refid="viewJoins"/>
+        WHERE a.id = #{id}
+        <if test="ownerDriverId != null">AND a.driver_id = #{ownerDriverId}</if>
+    </select>
+</mapper>
