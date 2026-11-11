@@ -46,13 +46,15 @@ public class FfmpegManager {
 
     /** 启动一路 FFmpeg 抽帧进程 *///注意这里实际上是两个线程，一个是os线程，用来接受网络像头的流，另一个是jvm虚拟机内部的线程，用来读 stdout 的字节
     public synchronized void start(Camera camera) {//synchronized：给方法加锁，同一时刻只有一个线程能进这个方法
-        if (processes.containsKey(camera.getId())) {
+        Process current = processes.get(camera.getId());
+        if (current != null && current.isAlive()) {
             return; // 已在跑的摄像头，别重复启动
         }
-        ProcessBuilder pb = new ProcessBuilder(buildCommand(camera));//ProcessBuilder：Java 里「启动一个外部进程」的工具。这里把 buildCommand(camera) 拼好的命令交给它。
-        pb.redirectError(ProcessBuilder.Redirect.DISCARD); // ffmpeg跟该进程一共有3个管道stdin, stdout, stderr，任意一个管道满而不被读取都会导致进程阻塞。所以直接丢掉 stderr，避免阻塞。
+        if (current != null) {
+            processes.remove(camera.getId(), current);
+        }
         try {
-            Process process = pb.start();//真正启动 FFmpeg 进程，返回一个 Process 对象。
+            Process process = startProcess(camera);//真正启动 FFmpeg 进程，返回一个 Process 对象。
             processes.put(camera.getId(), process);//把该进程放在线程安全的统一管理
 
             Thread reader = new Thread(() -> readFrames(camera, process)/*这里捕获了process，将管道一一绑定*/, "ffmpeg-" + camera.getId());//这个不是上面那个线程，而是jvm虚拟机内部的线程，用来读 stdout 的字节
@@ -63,6 +65,12 @@ public class FfmpegManager {
         } catch (IOException e) {
             log.error("camera {} ffmpeg 启动失败：{}", camera.getId(), e.getMessage());
         }
+    }
+
+    Process startProcess(Camera camera) throws IOException {
+        ProcessBuilder pb = new ProcessBuilder(buildCommand(camera));//ProcessBuilder：Java 里「启动一个外部进程」的工具。这里把 buildCommand(camera) 拼好的命令交给它。
+        pb.redirectError(ProcessBuilder.Redirect.DISCARD); // ffmpeg跟该进程一共有3个管道stdin, stdout, stderr，任意一个管道满而不被读取都会导致进程阻塞。所以直接丢掉 stderr，避免阻塞。
+        return pb.start();
     }
 
     /** 停止一路 FFmpeg 进程 */
@@ -121,6 +129,10 @@ public class FfmpegManager {
             }
         } catch (IOException e) {
             log.warn("camera {} 读流结束：{}", camera.getId(), e.getMessage());
+        } finally {
+            // 旧读流线程只能清理自己的进程，不能移除重启后登记的新进程。
+            processes.remove(camera.getId(), process);
+            process.destroy();
         }
     }
 }

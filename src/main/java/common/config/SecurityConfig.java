@@ -1,6 +1,8 @@
 package common.config;
 
 import common.security.JwtAuthFilter;
+import common.security.SecurityResponseWriter;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -28,6 +30,7 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+    private final SecurityResponseWriter securityResponseWriter;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -53,6 +56,12 @@ public class SecurityConfig {
             .cors(Customizer.withDefaults())/*启用 CORS，并且用「默认配置」。
                                             Customizer.withDefaults() 意思是「用默认方式配置」。Spring 会去找容器里的 CorsConfigurationSource Bean——就是上面那个方法返回的对象——用它来处理跨域。*/
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))//意思是服务器不创建也不使用 Session。因为我们用 JWT，每次请求都自己带 token，不需要服务器记住你是谁。这正好对应我们之前讲的「JWT 无状态」
+            .exceptionHandling(errors -> errors
+                .authenticationEntryPoint((request, response, exception) ->
+                    securityResponseWriter.write(response, HttpServletResponse.SC_UNAUTHORIZED, "未登录或登录已失效"))
+                .accessDeniedHandler((request, response, exception) ->
+                    securityResponseWriter.write(response, HttpServletResponse.SC_FORBIDDEN, "无权限访问"))
+            )
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(
                         "/api/auth/login",
@@ -62,6 +71,7 @@ public class SecurityConfig {
                 ).permitAll()
                 .requestMatchers("/api/auth/users/**").hasRole("PLATFORM_ADMIN")//「禁用/启用账号」这个接口只有平台管理员能调。
                 .requestMatchers("/api/fleets/**", "/api/vehicles/**", "/api/drivers/**").hasRole("PLATFORM_ADMIN")//三个档案接口只有平台管理员能管。
+                .requestMatchers("/api/cameras", "/api/cameras/**").hasRole("PLATFORM_ADMIN")//摄像头配置的读写接口都属于管理员功能。
                 .anyRequest().authenticated()//：其他请求都需要认证
             )
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);//把我们的 jwtAuthFilter 插到 UsernamePasswordAuthenticationFilter 前面。后面的这个过滤器没有真的启动，只是为了方便各过滤器排队

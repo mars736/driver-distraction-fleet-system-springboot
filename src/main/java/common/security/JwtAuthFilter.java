@@ -37,6 +37,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {//OncePerRequestFilter 
 
     private final JwtUtil jwtUtil;
     private final UserMapper userMapper;
+    private final SecurityResponseWriter securityResponseWriter;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -86,9 +87,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {//OncePerRequestFilter 
     }
 
     private void writeUnauthorized(HttpServletResponse response, String message) throws IOException {
-        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-        response.setContentType("application/json;charset=UTF-8");
-        response.getWriter().write("{\"code\":401,\"message\":\"" + message + "\",\"data\":null}");
+        securityResponseWriter.write(response, HttpServletResponse.SC_UNAUTHORIZED, message);
         /*response.getWriter().write("...") — 把 JSON 字符串写入响应缓冲区
           然后 return，没有调用 chain.doFilter(request, response)的话。整条链子就结束了。这恰恰是关键——Tomcat 发现过滤器链没有继续往下走（没到 Controller），
           就会自动把缓冲区里的内容 commit 并 flush 回客户端。*/
