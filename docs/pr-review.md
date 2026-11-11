@@ -29,3 +29,17 @@ PR #2 已合入 `fix/local-startup`，因此更新后的 PR #1 也包含告警�
 已随查询模块关闭 `/upload/alerts/**` 的直接访问，并处理 Windows 大小写路径和真实路径解析；图片改为按告警归属鉴权读取。真实 MySQL + JWT 集成测试覆盖司机访问他人记录/图片、匿名请求及静态路径绕过。
 
 以上修复随 `feature/alert-query` 提交，PR 以已包含告警模块的 `fix/local-startup` 为目标分支。审阅阶段未合并 PR 或发布 GitHub 评论；后续提交及推送由用户另行授权。
+
+# PR #3 审阅记录
+
+固定范围：`git diff b27162c...7517a4a`，增量提交 `7517a4a`。规格来源为后端架构第九节、`docs/alert-query.md` 与 `docs/alert-decision.md`；Standards 与 Spec 分别由独立只读审阅执行。
+
+## Standards
+
+0 项硬规范偏离，0 项可操作代码异味。沿用两种角色、统一账号模型、分层包结构和 Result/PageResult 约定。
+
+## Spec
+
+0 项可操作问题。多条件筛选、分页、时间边界、服务端司机归属限制、关键帧鉴权、未知速度非违规、模拟短信状态和已提交判定的连续性修复均与规格一致。人工处理、申诉、评分与时间线属于该 PR 明确延后范围。
+
+Standards 0 项，Spec 0 项；两个轴线均无阻断问题。沿用该提交全量 90 项测试通过的验证结果。审阅完成后，PR #3 合并为 `5c77b0f`，随后 PR #1 合入 master 为 `6267e2f`；新的处理模块基于该 master 开发。

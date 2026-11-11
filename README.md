@@ -12,7 +12,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    USE driver_fleet;
    ```
 
-   再执行 `src/main/resources/db/schema.sql`，创建基础四张表和识别记录、告警、车辆判定状态三张表。已有数据库也需要重新执行该脚本来增加新表，脚本使用 `CREATE TABLE IF NOT EXISTS`，不会删除已有表。建表脚本不会自动执行。
+   再执行 `src/main/resources/db/schema.sql`，创建基础四张表，以及识别记录、告警、车辆判定状态和人工处理历史四张表。已有数据库也需要重新执行该脚本来增加新表，脚本使用 `CREATE TABLE IF NOT EXISTS`，不会删除已有表。已有七张表时，可只执行 `src/main/resources/db/migrations/20261111_alert_review.sql`。建表脚本不会自动执行。
 3. 在 `src/main/resources/application.yml` 中配置 `spring.datasource` 的地址、用户名和密码。启动前必须完成建库、建表，因为应用初始化时会查询摄像头表。
 4. 在项目根目录执行：
 
@@ -36,6 +36,8 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 
 告警查询提供 `GET /api/alerts`、`GET /api/alerts/{id}` 和 `GET /api/alerts/{id}/key-frame`，支持组合筛选和分页。管理员可查询全部记录，司机仅可查询本人记录及图片。参数、返回字段和前端图片读取方式见 [告警查询说明](docs/alert-query.md)。两次 PR 的审阅及修复记录见 [PR 审阅记录](docs/pr-review.md)。
 
+管理员可通过 `POST /api/alerts/{id}/reviews` 确认或撤销待处理告警；`GET /api/alerts/{id}/reviews` 查看处理历史。状态和历史同事务提交，重复或并发覆盖返回 409。数据库升级和接口示例见 [告警处理说明](docs/alert-review.md)。
+
 未登录、无效或过期 token 返回 HTTP 401；已登录但权限不足返回 HTTP 403。两者均使用 `{ "code": ..., "message": "...", "data": null }` 格式。
 
 ## 验证
@@ -44,7 +46,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 # 权限和进程生命周期回归测试，不需要 MySQL、FFmpeg 或推理服务
 .\mvnw.cmd "-Dtest=CameraSecurityTest,FfmpegManagerTest" test
 
-# 全部常规测试：现有 contextLoads 测试需要配置可用的 MySQL 和上述七张表
+# 全部常规测试：现有 contextLoads 测试需要配置可用的 MySQL 和上述八张表
 .\mvnw.cmd test
 ```
 
