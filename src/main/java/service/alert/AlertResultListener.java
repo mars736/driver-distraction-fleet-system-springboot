@@ -36,6 +36,7 @@ public class AlertResultListener implements InferResultListener {
     private final Set<Long> failedVehicles = new HashSet<>();
     private final AtomicLong rejectedFrames = new AtomicLong();
     private final AtomicLong failedFrames = new AtomicLong();
+    private final AtomicLong deliveryFailures = new AtomicLong();
     private final Object admissionLock = new Object();
     private volatile boolean accepting;
     private Thread thread;
@@ -124,13 +125,16 @@ public class AlertResultListener implements InferResultListener {
         Long vehicle = frame.input().vehicleId();
         boolean broken = vehicle != null && (failedVehicles.contains(vehicle)
                 || processedGenerations.getOrDefault(vehicle, 0L) != frame.generation());
+        boolean decisionCommitted = false;
         for (int attempt = 1; attempt <= properties.getMaxAttempts(); attempt++) {
             try {
-                smsDispatcher.dispatch(decisionService.process(frame.input(), broken));
+                var pendingSms = decisionService.process(frame.input(), broken);
+                decisionCommitted = true;
                 if (vehicle != null) {
                     processedGenerations.put(vehicle, frame.generation());
                     failedVehicles.remove(vehicle);
                 }
+                smsDispatcher.dispatch(pendingSms);
                 return;
             } catch (Exception e) {
                 log.error("告警处理失败：sourceKey={}，attempt={}，异常类型={}",
@@ -143,10 +147,16 @@ public class AlertResultListener implements InferResultListener {
                 }
             }
         }
-        failedFrames.incrementAndGet();
-        if (vehicle != null) { failedVehicles.add(vehicle); }
-        log.error("告警帧重试耗尽，未完成处理：sourceKey={}，累计失败={}",
-                frame.input().sourceKey(), failedFrames.get());
+        if (decisionCommitted) {
+            deliveryFailures.incrementAndGet();
+            log.error("告警判定已提交，但短信派发重试耗尽：sourceKey={}，累计派发失败={}",
+                    frame.input().sourceKey(), deliveryFailures.get());
+        } else {
+            failedFrames.incrementAndGet();
+            if (vehicle != null) { failedVehicles.add(vehicle); }
+            log.error("告警帧重试耗尽，未完成判定：sourceKey={}，累计失败={}",
+                    frame.input().sourceKey(), failedFrames.get());
+        }
     }
 
     @PreDestroy
@@ -169,4 +179,5 @@ public class AlertResultListener implements InferResultListener {
 
     public long getRejectedFrames() { return rejectedFrames.get(); }
     public long getFailedFrames() { return failedFrames.get(); }
+    public long getDeliveryFailures() { return deliveryFailures.get(); }
 }

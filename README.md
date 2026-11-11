@@ -34,6 +34,8 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 
 告警规则、边界处理、配置、数据库集成测试及假推理服务使用方法见 [告警判定说明](docs/alert-decision.md)。
 
+告警查询提供 `GET /api/alerts`、`GET /api/alerts/{id}` 和 `GET /api/alerts/{id}/key-frame`，支持组合筛选和分页。管理员可查询全部记录，司机仅可查询本人记录及图片。参数、返回字段和前端图片读取方式见 [告警查询说明](docs/alert-query.md)。两次 PR 的审阅及修复记录见 [PR 审阅记录](docs/pr-review.md)。
+
 未登录、无效或过期 token 返回 HTTP 401；已登录但权限不足返回 HTTP 403。两者均使用 `{ "code": ..., "message": "...", "data": null }` 格式。
 
 ## 验证

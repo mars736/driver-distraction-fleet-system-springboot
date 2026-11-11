@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -72,6 +73,10 @@ public class SecurityConfig {
                 .requestMatchers("/api/auth/users/**").hasRole("PLATFORM_ADMIN")//「禁用/启用账号」这个接口只有平台管理员能调。
                 .requestMatchers("/api/fleets/**", "/api/vehicles/**", "/api/drivers/**").hasRole("PLATFORM_ADMIN")//三个档案接口只有平台管理员能管。
                 .requestMatchers("/api/cameras", "/api/cameras/**").hasRole("PLATFORM_ADMIN")//摄像头配置的读写接口都属于管理员功能。
+                .requestMatchers("/upload/alerts", "/upload/alerts/**").denyAll()
+                .requestMatchers(HttpMethod.GET, "/api/alerts", "/api/alerts/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
+                .requestMatchers(HttpMethod.HEAD, "/api/alerts", "/api/alerts/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
+                .requestMatchers("/api/alerts", "/api/alerts/**").denyAll()
                 .anyRequest().authenticated()//：其他请求都需要认证
             )
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);//把我们的 jwtAuthFilter 插到 UsernamePasswordAuthenticationFilter 前面。后面的这个过滤器没有真的启动，只是为了方便各过滤器排队

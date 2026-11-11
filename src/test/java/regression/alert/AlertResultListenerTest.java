@@ -14,6 +14,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import entity.AlertRecord;
+import service.alert.rule.AlertKind;
+import service.alert.rule.AlertRuleEngine;
+import service.alert.rule.VehicleAlertState;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
@@ -130,6 +136,46 @@ class AlertResultListenerTest {
         assertThat(processed.get(1L)).isFalse();
         assertThat(processed.get(3L)).isTrue();
         assertThat(listener.getRejectedFrames()).isEqualTo(1);
+    }
+
+    @Test
+    void smsDeliveryFailureDoesNotBreakCommittedPhoneSegment() throws Exception {
+        AlertRuleEngine engine = new AlertRuleEngine(5, 30, 5);
+        AtomicReference<VehicleAlertState> state = new AtomicReference<>(new VehicleAlertState());
+        AtomicInteger alertCount = new AtomicInteger();
+        AtomicInteger deliveryErrors = new AtomicInteger();
+        Map<String, List<AlertRecord>> committed = new ConcurrentHashMap<>();
+        Map<Long, Boolean> processed = new ConcurrentHashMap<>();
+        when(service.process(any(), anyBoolean())).thenAnswer(call -> {
+            CapturedInference input = call.getArgument(0);
+            boolean broken = call.getArgument(1);
+            return committed.computeIfAbsent(input.sourceKey(), ignored -> {
+                var evaluation = engine.evaluate(state.get(), new AlertRuleEngine.Observation(
+                        input.vehicleId(), input.driverId(), input.capturedAt(), input.pred(),
+                        input.ood(), 20.0, broken));
+                state.set(evaluation.state());
+                processed.put(input.frameId(), broken);
+                if (!evaluation.alerts().contains(AlertKind.SMS_ALERT)) { return List.of(); }
+                AlertRecord alert = new AlertRecord();
+                alert.setId((long) alertCount.incrementAndGet());
+                return List.of(alert);
+            });
+        });
+        doAnswer(call -> {
+            List<AlertRecord> alerts = call.getArgument(0);
+            if (!alerts.isEmpty()) {
+                deliveryErrors.incrementAndGet();
+                throw new IllegalStateException("Test SMS database unavailable after decision commit");
+            }
+            return null;
+        }).when(sms).dispatch(anyList());
+        start(16);
+        for (int i = 1; i <= 5; i++) { submit(i); }
+        await().atMost(3, TimeUnit.SECONDS).until(() -> deliveryErrors.get() >= 2);
+        for (int i = 6; i <= 10; i++) { submit(i); }
+        await().atMost(3, TimeUnit.SECONDS).until(() -> processed.containsKey(10L));
+        assertThat(processed.get(6L)).isFalse();
+        assertThat(alertCount.get()).isEqualTo(1);
     }
 
     @Test
