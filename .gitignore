@@ -34,3 +34,7 @@ build/
 
 ### Test artifacts ###
 smoke_test_input.mp4
+
+### Runtime artifacts ###
+/upload/
+__pycache__/

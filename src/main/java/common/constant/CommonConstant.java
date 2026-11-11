@@ -33,6 +33,9 @@ public final class CommonConstant {
     /** 后台记录（只记录，不发短信） */
     public static final String RECORD_TYPE_BACKLOG = "BACKLOG";
 
+    /** 速度未知异常，不属于司机分心违规，不应参与违规扣分。 */
+    public static final String RECORD_TYPE_SPEED_UNKNOWN = "SPEED_UNKNOWN";
+
     // ==================== 行为类别 ====================
     // 取值与 FastAPI 返回的 class_name 完全一致（A 已确认直接返回 "c0"~"c9"）
 
