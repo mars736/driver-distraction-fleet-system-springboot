@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.AlertDecisionMapper">
+    <insert id="ensureState">
+        INSERT INTO alert_vehicle_state (vehicle_id, state_json) VALUES (#{vehicleId}, #{json})
+        ON DUPLICATE KEY UPDATE vehicle_id = vehicle_id
+    </insert>
+    <select id="lockState" resultType="string">
+        SELECT state_json FROM alert_vehicle_state WHERE vehicle_id = #{vehicleId} FOR UPDATE
+    </select>
+    <update id="updateState">
+        UPDATE alert_vehicle_state SET state_json = #{json} WHERE vehicle_id = #{vehicleId}
+    </update>
+    <select id="findRecognition" resultType="entity.RecognitionRecord">
+        SELECT * FROM recognition_record WHERE source_key = #{sourceKey} FOR UPDATE
+    </select>
+    <insert id="insertRecognition" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO recognition_record
+        (source_key, source_frame_id, camera_id, vehicle_id, driver_id, fleet_id, captured_at,
+         pred, behavior_code, max_p, energy, knn_dist, ood, participated, decision_reason,
+         speed_kmh, speed_status, key_frame_path)
+        VALUES
+        (#{sourceKey}, #{sourceFrameId}, #{cameraId}, #{vehicleId}, #{driverId}, #{fleetId}, #{capturedAt},
+         #{pred}, #{behaviorCode}, #{maxP}, #{energy}, #{knnDist}, #{ood}, #{participated}, #{decisionReason},
+         #{speedKmh}, #{speedStatus}, #{keyFramePath})
+    </insert>
+    <insert id="insertAlert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO alert_record
+        (recognition_id, camera_id, vehicle_id, driver_id, fleet_id, captured_at, behavior_code,
+         max_p, record_type, event_count, sms_status, key_frame_path)
+        VALUES
+        (#{recognitionId}, #{cameraId}, #{vehicleId}, #{driverId}, #{fleetId}, #{capturedAt}, #{behaviorCode},
+         #{maxP}, #{recordType}, #{eventCount}, #{smsStatus}, #{keyFramePath})
+    </insert>
+    <select id="pendingSms" resultType="entity.AlertRecord">
+        SELECT * FROM alert_record WHERE recognition_id = #{recognitionId} AND sms_status = 'PENDING' FOR UPDATE
+    </select>
+    <update id="claimSms">
+        UPDATE alert_record SET sms_status = 'SENDING' WHERE id = #{id} AND sms_status = 'PENDING'
+    </update>
+    <update id="updateSmsStatus">
+        UPDATE alert_record SET sms_status = #{status} WHERE id = #{id} AND sms_status = 'SENDING'
+    </update>
+</mapper>
