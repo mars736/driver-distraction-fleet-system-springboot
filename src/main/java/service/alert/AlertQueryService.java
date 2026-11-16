@@ -38,7 +38,7 @@ public class AlertQueryService {
             throw new BusinessException(400, "startTime 必须早于 endTime");
         }
         AlertQueryFilter filter = new AlertQueryFilter(request.getFleetId(), request.getVehicleId(),
-                request.getDriverId(), owner, request.getBehaviorCode(), request.getRecordType(), start, end);
+                request.getDriverId(), owner, request.getBehaviorCode(), request.getRecordType(), request.getStatus(), start, end);
         long total = mapper.count(filter);
         long offset = ((long) request.getPage() - 1) * request.getPageSize();
         var rows = mapper.list(filter, offset, request.getPageSize());

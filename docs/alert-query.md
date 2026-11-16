@@ -1,6 +1,6 @@
 # 告警查询接口
 
-本阶段实现《后端架构》第九节中的多条件筛选、分页、详情和关联关键帧读取，沿用现有两种角色。确认、撤销、申诉、评分和前后帧时间线留待后续模块。
+本阶段实现《后端架构》第九节中的多条件筛选、分页、详情和关联关键帧读取，沿用现有两种角色。确认、撤销和处理记录见 [告警处理说明](alert-review.md)；申诉、评分和前后帧时间线留待后续模块。
 
 ## 权限与响应
 
@@ -16,7 +16,7 @@
 | GET | `/api/alerts/{id}` | 单条详情 |
 | GET / HEAD | `/api/alerts/{id}/key-frame` | 鉴权后读取 JPEG / 读取响应头 |
 
-查询接口不提供写操作，POST、PUT、PATCH、DELETE 均返回 403。
+以上查询路径不提供写操作，POST、PUT、PATCH、DELETE 均返回 403。管理员处理告警使用独立的 `POST /api/alerts/{id}/reviews`。
 
 列表可选参数：
 
@@ -25,6 +25,7 @@
 | `fleetId` / `vehicleId` / `driverId` | 正整数，可组合筛选 |
 | `behaviorCode` | 小写 `c0`—`c9` |
 | `recordType` | `SMS_ALERT`、`BACKLOG`、`SPEED_UNKNOWN` |
+| `status` | `OPEN`、`CONFIRMED`、`REVOKED` |
 | `startTime` / `endTime` | 北京时间，不带时区的 ISO 日期时间，如 `2026-11-11T08:00:00` |
 | `page` | 从 1 开始，默认 1 |
 | `pageSize` | 1—100，默认 10 |

@@ -10,6 +10,7 @@
             <if test="filter.driverId != null">AND a.driver_id = #{filter.driverId}</if>
             <if test="filter.behaviorCode != null">AND a.behavior_code = #{filter.behaviorCode}</if>
             <if test="filter.recordType != null">AND a.record_type = #{filter.recordType}</if>
+            <if test="filter.status != null">AND a.status = #{filter.status}</if>
             <if test="filter.startTime != null">AND a.captured_at &gt;= #{filter.startTime}</if>
             <if test="filter.endTime != null">AND a.captured_at &lt; #{filter.endTime}</if>
         </where>
