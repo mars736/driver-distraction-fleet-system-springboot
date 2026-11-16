@@ -187,6 +187,24 @@ class AlertReviewIntegrationTest {
     }
 
     @Test
+    void unsupportedContentTypeKeeps415WithoutChangingAlert() throws Exception {
+        mvc.perform(post(url(phone)).header("Authorization", adminToken).contentType(MediaType.TEXT_PLAIN)
+                        .content("{\"status\":\"CONFIRMED\",\"reason\":\"人工核查\"}"))
+                .andExpect(status().isUnsupportedMediaType()).andExpect(jsonPath("$.code").value(415));
+        assertThat(currentStatus(phone)).isEqualTo("OPEN");
+        assertThat(reviewCount(phone)).isZero();
+    }
+
+    @Test
+    void unsupportedAcceptKeeps406WithResultBody() throws Exception {
+        mvc.perform(get(url(phone)).header("Authorization", driverToken).accept(MediaType.TEXT_PLAIN))
+                .andExpect(status().isNotAcceptable()).andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.code").value(406));
+        assertThat(currentStatus(phone)).isEqualTo("OPEN");
+        assertThat(reviewCount(phone)).isZero();
+    }
+
+    @Test
     void reasonBoundaryAndInvalidIds() throws Exception {
         mvc.perform(post(url(phone)).header("Authorization", adminToken).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"status\":\"CONFIRMED\",\"reason\":\"" + "核".repeat(501) + "\"}"))
