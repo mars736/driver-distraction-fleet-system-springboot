@@ -40,3 +40,14 @@ Java 21。新增测试通过后运行全部常规测试，使用独立 H2 MySQL 
 ## 后续交接
 
 用户于审查后选择先推送 `feature/driver-score`，再在 Windows 上做真实 MySQL 验证。以上“未提交/推送”描述审查阶段，不表示分支的实时发布状态。Windows 专用库及完整 PowerShell 命令见 driver-score.md；MySQL 结果应在验证完成后另行追加，不提前标记通过。
+
+## Windows 接续验证已完成（2026-11-16）
+
+在 `14ec479` 上，使用 Java 21.0.13 / MySQL 8.0.45、新建专用 `driver_score_test` 库及正式十一张表结构：
+
+- 评分专项实际执行 60 项，全部通过，0 失败、0 错误、0 跳过。
+- `clean test` 全量实际执行 199 项，全部通过，0 失败、0 错误、0 跳过，原 MySQL 条件测试也全部开启。
+- 使用 REPEATABLE-READ、ONLY_FULL_GROUP_BY 和严格 SQL 模式；数据源日志确认使用真实 MySQL。
+- 结束后仅保留初始化车队和账号，各业务测试表为空；本机数据库配置保留，开发库数据未用于本轮测试。
+
+此前仅 H2 验证的限制已补验；本轮没有修改评分逻辑或 SQL，也没有执行推送、合并或部署。操作细节见 `driver-score.md` 的 Windows 真实 MySQL 验证结果。

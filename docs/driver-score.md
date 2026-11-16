@@ -146,3 +146,16 @@ try {
 ```
 
 完成后关闭该 PowerShell 窗口即可清除其余临时环境变量。不要把数据库密码或 JWT 发到聊天中；反馈 Maven 最后测试汇总即可。现有开发库不需要为评分模块新增表，也不应被用作本轮测试库。
+
+## Windows 真实 MySQL 验证结果（2026-11-16）
+
+已在 Windows / Java 21.0.13 / MySQL 8.0.45 上完成接续验证，代码基于 `14ec479`。上文“未运行真实 MySQL”描述的是此前 Mac 验证阶段，现已补验。
+
+- 新建独立 `driver_score_test` 库并导入正式 `schema.sql` 的十一张表，未对 `driver_fleet` 开发库执行本轮测试。
+- 专项：`-Dtest=ScorePeriodTest,DriverScoreIntegrationTest test`，60 项通过（17 项周期/等级、43 项 HTTP/MyBatis/JWT），0 失败、0 错误、0 跳过。
+- 完整：同时开启 `DRIVER_SCORE_MYSQL_TESTS=true`、`DRIVER_FLEET_DB_TESTS=true`，并把两套数据源环境变量均指向专用库，执行 `clean test`，199 项通过，0 失败、0 错误、0 跳过。
+- 数据库隔离级别为 REPEATABLE-READ，SQL 模式包含 ONLY_FULL_GROUP_BY、STRICT_TRANS_TABLES。测试日志确认各 Spring 数据源均建立 MySQL JDBC 连接，未切回 H2。
+- 测试后核对十一张表：仅剩应用初始化的 1 个车队、1 个账号；摄像头、车辆、识别、告警、状态、处理历史及三张申诉表均为空，测试业务数据已清理。
+- 本机 `application.yml` 的原有修改已保留，密码仅通过测试进程环境变量传递，未写入测试文档或新增配置。
+
+本轮未发现需要修改的评分 SQL 或业务代码；未推送、创建或合并 PR，也未部署服务器。该结果覆盖测试场景，不替代真实摄像头、模型、短信和上线负载联调。
