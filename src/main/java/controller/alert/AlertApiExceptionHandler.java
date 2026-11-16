@@ -1,6 +1,7 @@
 package controller.alert;
 
 import common.exception.BusinessException;
+import controller.score.DriverScoreController;
 import common.response.Result;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
@@ -17,7 +18,7 @@ import java.io.IOException;
 
 /** 告警模块返回真实 HTTP 状态码，不改变其他既有业务模块的约定。 */
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(assignableTypes = {AlertQueryController.class, AlertReviewController.class, AppealController.class})
+@RestControllerAdvice(assignableTypes = {AlertQueryController.class, AlertReviewController.class, AppealController.class, DriverScoreController.class})
 @Slf4j
 public class AlertApiExceptionHandler {
     @ExceptionHandler(BusinessException.class)
