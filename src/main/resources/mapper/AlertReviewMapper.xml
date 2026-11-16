@@ -14,6 +14,9 @@
         VALUES (#{alertId}, #{fromStatus}, #{toStatus}, #{reason}, #{operatorId},
                 #{operatorUsername}, #{operatorName}, #{operatedAt})
     </insert>
+    <update id="updateReviewableStatus">
+        UPDATE alert_record SET status=#{status} WHERE id=#{id} AND status IN ('OPEN','CONFIRMED')
+    </update>
     <select id="listReviews" resultType="entity.AlertReviewRecord">
         SELECT * FROM alert_review_record WHERE alert_id = #{alertId} ORDER BY operated_at DESC, id DESC
     </select>

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.AppealMapper">
+    <select id="lockRecognition" resultType="entity.RecognitionRecord">
+        SELECT * FROM recognition_record WHERE id=#{id} FOR UPDATE
+    </select>
+    <select id="linkedBehaviorAlert" resultType="long">
+        <!-- 识别行是锁定读，关联告警也必须读最新结果，不能漏掉快照建立后刚提交的告警。 -->
+        SELECT id FROM alert_record WHERE recognition_id=#{recognitionId} AND record_type IN ('SMS_ALERT','BACKLOG') LIMIT 1 FOR UPDATE
+    </select>
+    <select id="find" resultType="entity.AppealRecord">
+        SELECT * FROM alert_appeal WHERE id=#{id}
+        <if test="owner != null">AND driver_id=#{owner}</if>
+    </select>
+    <select id="lock" resultType="entity.AppealRecord">
+        SELECT * FROM alert_appeal WHERE id=#{id} FOR UPDATE
+    </select>
+    <select id="latestForTarget" resultType="entity.AppealRecord">
+        <!-- 这里要读取加锁后的最新数据，不能沿用事务开始时的旧快照，否则可能重复受理。 -->
+        SELECT * FROM alert_appeal WHERE target_type=#{type} AND target_id=#{targetId} ORDER BY id DESC LIMIT 1 FOR UPDATE
+    </select>
+    <select id="pendingForAlert" resultType="long">
+        SELECT id FROM alert_appeal WHERE target_type='ALERT' AND target_id=#{alertId} AND status='PENDING' LIMIT 1 FOR UPDATE
+    </select>
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO alert_appeal(target_type,target_id,driver_id,fleet_id,vehicle_id,reason,target_status_before,status,create_time,update_time)
+        VALUES(#{targetType},#{targetId},#{driverId},#{fleetId},#{vehicleId},#{reason},#{targetStatusBefore},'PENDING',#{createTime},#{updateTime})
+    </insert>
+    <update id="finish">
+        <!-- 再加一道状态条件：已经结束的申诉不能被后来的请求覆盖。 -->
+        UPDATE alert_appeal SET status=#{status},decision_reason=#{decisionReason},reviewer_id=#{reviewerId},reviewed_at=#{reviewedAt},update_time=#{updateTime}
+        WHERE id=#{id} AND status='PENDING'
+    </update>
+    <sql id="filters">
+        <where>
+            <!-- owner 由登录信息生成，和前端筛选条件同时成立，不能被 driverId 替换。 -->
+            <if test="owner != null">AND driver_id=#{owner}</if>
+            <if test="q.driverId != null">AND driver_id=#{q.driverId}</if>
+            <if test="q.status != null">AND status=#{q.status}</if>
+            <if test="q.targetType != null">AND target_type=#{q.targetType}</if>
+            <if test="q.targetId != null">AND target_id=#{q.targetId}</if>
+        </where>
+    </sql>
+    <select id="count" resultType="long">SELECT COUNT(*) FROM alert_appeal <include refid="filters"/></select>
+    <select id="list" resultType="entity.AppealRecord">
+        SELECT * FROM alert_appeal <include refid="filters"/> ORDER BY create_time DESC,id DESC LIMIT #{q.pageSize} OFFSET #{offset}
+    </select>
+    <insert id="insertEvent" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO alert_appeal_event(appeal_id,action,content,operator_id,operator_username,operator_name,operator_role,alert_review_id,material_id,operated_at)
+        VALUES(#{appealId},#{action},#{content},#{operatorId},#{operatorUsername},#{operatorName},#{operatorRole},#{alertReviewId},#{materialId},#{operatedAt})
+    </insert>
+    <select id="events" resultType="entity.AppealEvent">
+        SELECT * FROM alert_appeal_event WHERE appeal_id=#{appealId} ORDER BY id ASC
+    </select>
+    <insert id="insertMaterial" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO alert_appeal_material(appeal_id,original_name,content_type,size_bytes,relative_path,uploaded_by,uploaded_at)
+        VALUES(#{appealId},#{originalName},#{contentType},#{sizeBytes},#{relativePath},#{uploadedBy},#{uploadedAt})
+    </insert>
+    <select id="lockMaterialIds" resultType="long">
+        <!-- 锁定读才会看到排队期间刚提交的材料；普通 COUNT 会沿用旧事务快照。 -->
+        SELECT id FROM alert_appeal_material WHERE appeal_id=#{appealId} ORDER BY id LIMIT 10 FOR UPDATE
+    </select>
+    <select id="materials" resultType="entity.AppealMaterial">SELECT * FROM alert_appeal_material WHERE appeal_id=#{appealId} ORDER BY id ASC</select>
+    <select id="material" resultType="entity.AppealMaterial">SELECT * FROM alert_appeal_material WHERE appeal_id=#{appealId} AND id=#{id}</select>
+</mapper>

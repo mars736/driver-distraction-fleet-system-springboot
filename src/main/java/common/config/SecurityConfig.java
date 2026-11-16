@@ -73,7 +73,13 @@ public class SecurityConfig {
                 .requestMatchers("/api/auth/users/**").hasRole("PLATFORM_ADMIN")//「禁用/启用账号」这个接口只有平台管理员能调。
                 .requestMatchers("/api/fleets/**", "/api/vehicles/**", "/api/drivers/**").hasRole("PLATFORM_ADMIN")//三个档案接口只有平台管理员能管。
                 .requestMatchers("/api/cameras", "/api/cameras/**").hasRole("PLATFORM_ADMIN")//摄像头配置的读写接口都属于管理员功能。
-                .requestMatchers("/upload/alerts", "/upload/alerts/**").denyAll()
+                .requestMatchers("/upload/alerts", "/upload/alerts/**", "/upload/appeals", "/upload/appeals/**").denyAll()
+                // 角色决定能执行哪类操作；具体记录是否属于该司机，还要由 Service 再检查。
+                .requestMatchers(HttpMethod.POST, "/api/appeals/*/decision").hasRole("PLATFORM_ADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/appeals", "/api/appeals/*/supplements", "/api/appeals/*/withdraw", "/api/appeals/*/materials").hasRole("DRIVER")
+                .requestMatchers(HttpMethod.GET, "/api/appeals", "/api/appeals/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
+                .requestMatchers(HttpMethod.HEAD, "/api/appeals", "/api/appeals/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
+                .requestMatchers("/api/appeals", "/api/appeals/**").denyAll()
                 .requestMatchers(HttpMethod.POST, "/api/alerts/*/reviews").hasRole("PLATFORM_ADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/alerts", "/api/alerts/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
                 .requestMatchers(HttpMethod.HEAD, "/api/alerts", "/api/alerts/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")

@@ -53,7 +53,7 @@ alert:
   shutdown-wait-ms: 5000
 ```
 
-关键帧保存在 `file.upload-dir` 下的 `alerts/yyyy/MM/dd/`。只保存触发时当前帧，没有实现告警前后帧缓存、时间线查询、申诉、评分或 WebSocket 推送。告警列表、详情和鉴权图片读取见 [告警查询说明](alert-query.md)。
+关键帧保存在 `file.upload-dir` 下的 `alerts/yyyy/MM/dd/`。只保存触发时当前帧，没有实现告警前后帧缓存、时间线查询、评分或 WebSocket 推送。告警列表、详情和鉴权图片读取见 [告警查询说明](alert-query.md)，司机申诉见 [申诉说明](alert-appeal.md)。
 
 ## 验证
 
