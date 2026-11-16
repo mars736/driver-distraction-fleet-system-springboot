@@ -4,12 +4,20 @@ import common.response.Result;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 /**
  * 全局异常处理：把业务异常和参数校验异常统一转成 Result。
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    // multipart 解析可能在定位 Controller 之前失败，因此在全局返回统一的 413。
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Result<Void>> handleUploadSize(MaxUploadSizeExceededException exception) {
+        return ResponseEntity.status(413).body(Result.error(413, "上传文件超过大小限制"));
+    }
 
     @ExceptionHandler(BusinessException.class)
     public Result<Void> handleBusiness(BusinessException e) {

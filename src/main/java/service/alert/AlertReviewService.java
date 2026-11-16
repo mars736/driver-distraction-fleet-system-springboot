@@ -7,6 +7,7 @@ import dto.alert.AlertReviewRequest;
 import entity.AlertReviewRecord;
 import lombok.RequiredArgsConstructor;
 import mapper.AlertReviewMapper;
+import mapper.AppealMapper;
 import mapper.UserMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +22,7 @@ public class AlertReviewService {
     private final AlertReviewMapper mapper;
     private final UserMapper userMapper;
     private final AlertQueryService queryService;
+    private final AppealMapper appealMapper;
 
     @Transactional
     public AlertReviewRecord review(long id, AlertReviewRequest request) {
@@ -45,6 +47,10 @@ public class AlertReviewService {
         // 行锁串行化同一告警的并发处理；状态和操作历史必须在一个事务中提交。
         var alert = mapper.lockAlert(id);
         if (alert == null) { throw new BusinessException(404, "告警不存在"); }
+        if (appealMapper.pendingForAlert(id) != null) {
+            // 有申诉时走统一复核流程，不能在这里先改掉告警，留下未结束的申诉。
+            throw new BusinessException(409, "该告警有待复核申诉，请通过申诉入口处理");
+        }
         if (!AlertStatus.OPEN.name().equals(alert.getStatus())) {
             throw new BusinessException(409, "告警已处理，请刷新后查看结果");
         }

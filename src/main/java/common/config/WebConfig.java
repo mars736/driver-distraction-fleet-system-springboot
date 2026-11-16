@@ -26,7 +26,8 @@ public class WebConfig implements WebMvcConfigurer {
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         // 末尾必须带 /，否则会把目录当文件解析
         String location = uploadDir.endsWith("/") ? uploadDir : uploadDir + "/";
-        Path alerts = Path.of(uploadDir).toAbsolutePath().normalize().resolve("alerts");
+        Path uploadRoot = Path.of(uploadDir).toAbsolutePath().normalize();
+        var privateDirs = java.util.List.of(uploadRoot.resolve("alerts"), uploadRoot.resolve("appeals"));
         registry.addResourceHandler("/upload/**")
                 .addResourceLocations("file:" + location)
                 .resourceChain(false)
@@ -35,13 +36,18 @@ public class WebConfig implements WebMvcConfigurer {
                     protected Resource getResource(String resourcePath, Resource root) throws IOException {
                         // Windows 文件系统不区分大小写，不能仅依赖 URL 大小写敏感的安全匹配。
                         String normalized = resourcePath.replace('\\', '/');
-                        if (normalized.equalsIgnoreCase("alerts") || normalized.regionMatches(true, 0, "alerts/", 0, 7)) {
-                            return null;
+                        for (String name : java.util.List.of("alerts", "appeals")) {
+                            if (normalized.equalsIgnoreCase(name) || normalized.regionMatches(true, 0, name + "/", 0, name.length() + 1)) {
+                                return null;
+                            }
                         }
                         Resource resource = super.getResource(resourcePath, root);
-                        if (resource != null && resource.isFile() && Files.exists(alerts)
-                                && resource.getFile().toPath().toRealPath().startsWith(alerts.toRealPath())) {
-                            return null;
+                        if (resource != null && resource.isFile()) {
+                            for (Path directory : privateDirs) {
+                                if (Files.exists(directory) && resource.getFile().toPath().toRealPath().startsWith(directory.toRealPath())) {
+                                    return null;
+                                }
+                            }
                         }
                         return resource;
                     }

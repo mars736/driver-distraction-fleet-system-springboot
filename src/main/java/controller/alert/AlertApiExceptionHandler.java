@@ -17,22 +17,26 @@ import java.io.IOException;
 
 /** 告警模块返回真实 HTTP 状态码，不改变其他既有业务模块的约定。 */
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(assignableTypes = {AlertQueryController.class, AlertReviewController.class})
+@RestControllerAdvice(assignableTypes = {AlertQueryController.class, AlertReviewController.class, AppealController.class})
 @Slf4j
 public class AlertApiExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<Result<Void>> businessError(BusinessException exception) {
-        return ResponseEntity.status(exception.getCode()).body(Result.error(exception.getCode(), exception.getMessage()));
+        // 下载请求可能只接受 PDF/图片，但失败时仍要返回约定的 JSON，不能继续按文件格式协商。
+        return ResponseEntity.status(exception.getCode()).contentType(MediaType.APPLICATION_JSON)
+                .body(Result.error(exception.getCode(), exception.getMessage()));
     }
 
     @ExceptionHandler({BindException.class, MethodArgumentTypeMismatchException.class, HttpMessageNotReadableException.class})
     public ResponseEntity<Result<Void>> invalidRequest(Exception exception) {
-        return ResponseEntity.badRequest().body(Result.error(400, "请求参数格式或范围不正确"));
+        return ResponseEntity.badRequest().contentType(MediaType.APPLICATION_JSON)
+                .body(Result.error(400, "请求参数格式或范围不正确"));
     }
 
     @ExceptionHandler(IOException.class)
     public ResponseEntity<Result<Void>> fileError(IOException exception) {
-        return ResponseEntity.internalServerError().body(Result.error(500, "关键帧读取失败"));
+        return ResponseEntity.internalServerError().contentType(MediaType.APPLICATION_JSON)
+                .body(Result.error(500, "文件操作失败"));
     }
 
     @ExceptionHandler(Exception.class)
@@ -44,6 +48,7 @@ public class AlertApiExceptionHandler {
                     .body(Result.error(error.getStatusCode().value(), "请求类型或响应格式不受支持"));
         }
         log.error("告警接口执行失败，异常类型={}", exception.getClass().getSimpleName());
-        return ResponseEntity.internalServerError().body(Result.error(500, "告警操作失败，请稍后重试"));
+        return ResponseEntity.internalServerError().contentType(MediaType.APPLICATION_JSON)
+                .body(Result.error(500, "告警操作失败，请稍后重试"));
     }
 }
