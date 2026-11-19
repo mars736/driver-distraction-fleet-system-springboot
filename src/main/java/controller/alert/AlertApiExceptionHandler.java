@@ -2,6 +2,7 @@ package controller.alert;
 
 import common.exception.BusinessException;
 import controller.score.DriverScoreController;
+import controller.telemetry.VehicleTelemetryController;
 import common.response.Result;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
@@ -16,9 +17,10 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.ErrorResponse;
 import java.io.IOException;
 
-/** 告警模块返回真实 HTTP 状态码，不改变其他既有业务模块的约定。 */
+/** 告警、评分和车辆定位上报接口使用真实 HTTP 状态码。 */
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(assignableTypes = {AlertQueryController.class, AlertReviewController.class, AppealController.class, DriverScoreController.class})
+@RestControllerAdvice(assignableTypes = {AlertQueryController.class, AlertReviewController.class,
+        AppealController.class, DriverScoreController.class, VehicleTelemetryController.class})
 @Slf4j
 public class AlertApiExceptionHandler {
     @ExceptionHandler(BusinessException.class)

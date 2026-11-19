@@ -86,6 +86,8 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/alerts", "/api/alerts/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
                 .requestMatchers(HttpMethod.HEAD, "/api/alerts", "/api/alerts/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
                 .requestMatchers("/api/alerts", "/api/alerts/**").denyAll()
+                .requestMatchers(HttpMethod.POST, "/api/vehicle-telemetry").hasRole("DRIVER")
+                .requestMatchers("/api/vehicle-telemetry", "/api/vehicle-telemetry/**").denyAll()
                 .anyRequest().authenticated()//：其他请求都需要认证
             )
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);//把我们的 jwtAuthFilter 插到 UsernamePasswordAuthenticationFilter 前面。后面的这个过滤器没有真的启动，只是为了方便各过滤器排队
