@@ -12,7 +12,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    USE driver_fleet;
    ```
 
-   再执行 `src/main/resources/db/schema.sql`，创建十一张业务表。已有数据库可重复执行该脚本增加缺失表，不删除已有表；已有八张表时，可只执行 `src/main/resources/db/migrations/20261116_alert_appeal.sql`。如果还未增加人工处理历史表，应先执行 `20261111_alert_review.sql`。建表脚本不会自动执行。
+   再执行 `src/main/resources/db/schema.sql`，创建十二张业务表。已有数据库可重复执行该脚本增加缺失表。已经部署申诉模块的库，启动本版本前执行 `src/main/resources/db/migrations/20261120_alert_key_frame_timeline.sql` 即可。建表脚本不会自动执行。
 3. 在 `src/main/resources/application.yml` 中配置 `spring.datasource` 的地址、用户名和密码。启动前必须完成建库、建表，因为应用初始化时会查询摄像头表。
 4. 在项目根目录执行：
 
@@ -42,13 +42,15 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 
 未登录、无效或过期 token 返回 HTTP 401；已登录但权限不足返回 HTTP 403。两者均使用 `{ "code": ..., "message": "...", "data": null }` 格式。
 
+告警时间线提供 `GET /api/alerts/{id}/key-frames`，按顺序返回可用的前一帧、触发帧和后一帧。权限及前端接入方式见 [告警关键帧时间线](docs/alert-key-frame-timeline.md)。
+
 ## 验证
 
 ```powershell
 # 权限和进程生命周期回归测试，不需要 MySQL、FFmpeg 或推理服务
 .\mvnw.cmd "-Dtest=CameraSecurityTest,FfmpegManagerTest" test
 
-# 全部常规测试：现有 contextLoads 测试需要配置可用的 MySQL 和上述十一张表
+# 全部常规测试：现有 contextLoads 测试需要配置可用的 MySQL 和上述十二张表
 .\mvnw.cmd test
 ```
 
