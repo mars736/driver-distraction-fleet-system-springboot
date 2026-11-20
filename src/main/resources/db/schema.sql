@@ -86,7 +86,8 @@ CREATE TABLE IF NOT EXISTS recognition_record (
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_recognition_source (source_key),
     KEY idx_recognition_vehicle_time (vehicle_id, captured_at),
-    KEY idx_recognition_driver_time (driver_id, captured_at)
+    KEY idx_recognition_driver_time (driver_id, captured_at),
+    KEY idx_recognition_dashboard_time (captured_at)
 ) COMMENT '识别记录';
 
 CREATE TABLE IF NOT EXISTS alert_record (
@@ -109,7 +110,8 @@ CREATE TABLE IF NOT EXISTS alert_record (
     UNIQUE KEY uk_alert_recognition_type (recognition_id, record_type),
     KEY idx_alert_vehicle_time (vehicle_id, captured_at),
     KEY idx_alert_driver_time (driver_id, captured_at),
-    KEY idx_alert_sms (sms_status)
+    KEY idx_alert_sms (sms_status),
+    KEY idx_alert_dashboard_time (captured_at)
 ) COMMENT '告警与速度未知异常';
 
 CREATE TABLE IF NOT EXISTS alert_vehicle_state (

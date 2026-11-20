@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.DashboardMapper">
+    <sql id="dailyScope">
+        WHERE captured_at &gt;= #{start} AND captured_at &lt; #{end}
+        <if test="fleetId != null">AND fleet_id = #{fleetId}</if>
+        <if test="vehicleId != null">AND vehicle_id = #{vehicleId}</if>
+        <if test="driverId != null">AND driver_id = #{driverId}</if>
+    </sql>
+
+    <select id="fleetSize" resultType="vo.dashboard.DashboardView$FleetSize">
+        SELECT (SELECT COUNT(*) FROM vehicle
+                   <if test="fleetId != null">WHERE fleet_id = #{fleetId}</if>) AS vehicle_count,
+               (SELECT COUNT(*) FROM sys_user WHERE role = 'DRIVER'
+                   <if test="fleetId != null">AND fleet_id = #{fleetId}</if>) AS driver_count
+    </select>
+
+    <select id="recognitionBuckets" resultType="vo.dashboard.DashboardView$Bucket">
+        SELECT CASE
+            WHEN ood = 1 THEN 'OOD'
+            WHEN behavior_code IN ('c0','c1','c2','c3','c4','c5','c6','c7','c8','c9') THEN behavior_code
+            ELSE 'UNKNOWN'
+        END AS category, COUNT(*) AS frame_count
+        FROM recognition_record
+        <include refid="dailyScope"/>
+        GROUP BY category
+        ORDER BY category
+    </select>
+
+    <select id="alertCounts" resultType="vo.dashboard.DashboardView$Alerts">
+        SELECT COUNT(CASE WHEN record_type IN ('SMS_ALERT', 'BACKLOG') AND status IN ('OPEN','CONFIRMED') THEN 1 END) AS active_violation_count,
+               COUNT(CASE WHEN record_type = 'SPEED_UNKNOWN' THEN 1 END) AS speed_unknown_count,
+               COUNT(CASE WHEN record_type IN ('SMS_ALERT', 'BACKLOG') AND status = 'REVOKED' THEN 1 END) AS revoked_violation_count
+        FROM alert_record
+        <include refid="dailyScope"/>
+    </select>
+
+    <select id="recentAlerts" resultType="vo.dashboard.DashboardView$RecentAlert">
+        SELECT id, vehicle_id, captured_at, record_type, behavior_code, status
+        FROM alert_record
+        WHERE driver_id = #{driverId}
+        ORDER BY captured_at DESC, id DESC
+        LIMIT 5
+    </select>
+
+    <select id="vehicleAlertState" resultType="string">
+        SELECT state_json FROM alert_vehicle_state WHERE vehicle_id = #{vehicleId}
+    </select>
+</mapper>
