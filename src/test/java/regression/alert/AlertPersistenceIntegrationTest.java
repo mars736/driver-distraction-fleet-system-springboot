@@ -16,6 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -71,6 +72,7 @@ class AlertPersistenceIntegrationTest {
     @Autowired AlertRuleEngine engine;
     @Autowired ObjectMapper json;
     @Autowired KeyFrameStore keyFrames;
+    @Autowired ApplicationEventPublisher events;
     @Autowired MutableSpeed speed;
     @Autowired PlatformTransactionManager transactions;
     @Autowired InferFrameQueue queue;
@@ -138,7 +140,7 @@ class AlertPersistenceIntegrationTest {
     @Test
     void stateRestoresIntoNewServiceInstance() throws Exception {
         for (int i = 0; i < 4; i++) { service.process(input(1, false), false); }
-        AlertDecisionService restarted = new AlertDecisionService(mapper, vehicles, speed, engine, json, keyFrames);
+        AlertDecisionService restarted = new AlertDecisionService(mapper, vehicles, speed, engine, json, keyFrames, events);
         CapturedInference fifth = input(3, false);
         List<AlertRecord> alerts = new TransactionTemplate(transactions).execute(status -> {
             try { return restarted.process(fifth, false); }

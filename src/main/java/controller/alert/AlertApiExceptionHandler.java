@@ -17,7 +17,8 @@ import java.io.IOException;
 
 /** 告警模块返回真实 HTTP 状态码，不改变其他既有业务模块的约定。 */
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(assignableTypes = {AlertQueryController.class, AlertReviewController.class, AppealController.class})
+@RestControllerAdvice(assignableTypes = {AlertQueryController.class, AlertReviewController.class,
+        AppealController.class, AlertLiveController.class})
 @Slf4j
 public class AlertApiExceptionHandler {
     @ExceptionHandler(BusinessException.class)

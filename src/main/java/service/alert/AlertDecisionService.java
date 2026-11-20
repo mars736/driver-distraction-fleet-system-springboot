@@ -7,6 +7,7 @@ import entity.Vehicle;
 import lombok.RequiredArgsConstructor;
 import mapper.AlertDecisionMapper;
 import mapper.VehicleMapper;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -14,6 +15,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import service.alert.rule.AlertKind;
 import service.alert.rule.AlertRuleEngine;
 import service.alert.rule.VehicleAlertState;
+import service.alert.live.AlertCreatedEvent;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -29,6 +31,7 @@ public class AlertDecisionService {
     private final AlertRuleEngine engine;
     private final ObjectMapper objectMapper;
     private final KeyFrameStore keyFrameStore;
+    private final ApplicationEventPublisher events;
 
     /** 锁定车辆状态，识别记录、告警和计数一起提交；重试不会重复累计。 */
     @Transactional(rollbackFor = Exception.class)
@@ -77,6 +80,7 @@ public class AlertDecisionService {
                     : kind == AlertKind.BACKLOG ? evaluation.state().getOtherEvents() : 0);
             alert.setSmsStatus(kind == AlertKind.SMS_ALERT ? "PENDING" : "NOT_REQUIRED");
             mapper.insertAlert(alert);
+            events.publishEvent(AlertCreatedEvent.from(alert));
         }
         if (vehicle != null) {
             mapper.updateState(vehicle.getId(), objectMapper.writeValueAsString(evaluation.state()));

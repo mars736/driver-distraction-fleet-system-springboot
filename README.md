@@ -42,6 +42,8 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 
 未登录、无效或过期 token 返回 HTTP 401；已登录但权限不足返回 HTTP 403。两者均使用 `{ "code": ..., "message": "...", "data": null }` 格式。
 
+告警写入数据库后可通过 SSE 通知在线管理员和对应司机。连接、权限及断线补查见 [实时告警订阅](docs/alert-live-stream.md)。
+
 ## 验证
 
 ```powershell
