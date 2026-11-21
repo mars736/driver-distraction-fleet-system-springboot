@@ -43,7 +43,7 @@ public class AlertDecisionService {
         RecognitionRecord existing = mapper.findRecognition(input.sourceKey());
         if (existing != null) { return mapper.pendingSms(existing.getId()); }
 
-        Double speed = vehicle == null ? null : speedProvider.speedKmh(vehicle.getId(), input.capturedAt());
+        Double speed = vehicle == null ? null : speedProvider.speedKmh(vehicle.getId(), input.driverId(), input.capturedAt());
         boolean validNumbers = Double.isFinite(input.maxP()) && input.maxP() >= 0 && input.maxP() <= 1
                 && Double.isFinite(input.energy()) && Double.isFinite(input.knnDist()) && input.knnDist() >= 0;
         AlertRuleEngine.Evaluation evaluation = engine.evaluate(state, new AlertRuleEngine.Observation(
