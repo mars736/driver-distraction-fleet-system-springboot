@@ -88,6 +88,11 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- 内存数据库只用于评分查询测试，不会打包进线上运行依赖。 -->
+        <dependency>
+            <groupId>com.h2database</groupId><artifactId>h2</artifactId><scope>test</scope>
+        </dependency>
+
         <!-- 测试 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

@@ -3,17 +3,22 @@ package regression.alert;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mars736.driverdistractionfleetsystemspringboot.DriverDistractionFleetSystemSpringbootApplication;
 import com.sun.net.httpserver.HttpServer;
+import common.util.JwtUtil;
 import entity.AlertRecord;
 import inferworker.*;
 import mapper.AlertDecisionMapper;
+import mapper.AlertTimelineMapper;
 import mapper.VehicleMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
@@ -22,8 +27,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import service.alert.*;
 import service.alert.rule.AlertRuleEngine;
 import service.alert.rule.VehicleAlertState;
@@ -44,18 +52,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.awaitility.Awaitility.await;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /** 显式开启后在已建表的本机 MySQL 上验证；所有业务夹具在结束后删除。 */
 @EnabledIfEnvironmentVariable(named = "DRIVER_FLEET_DB_TESTS", matches = "true")
 @SpringBootTest(classes = DriverDistractionFleetSystemSpringbootApplication.class,
         properties = "alert.retry-delay-ms=10")
 @Import(AlertPersistenceIntegrationTest.SpeedConfig.class)
+@AutoConfigureMockMvc
 class AlertPersistenceIntegrationTest {
     @TempDir static Path uploads;
     @DynamicPropertySource
@@ -64,9 +78,12 @@ class AlertPersistenceIntegrationTest {
     }
 
     @Autowired JdbcTemplate jdbc;
+    @Autowired MockMvc mvc;
+    @Autowired JwtUtil jwt;
     @Autowired AlertDecisionService service;
     @Autowired SmsDispatcher dispatcher;
     @Autowired AlertDecisionMapper mapper;
+    @Autowired AlertTimelineMapper timelineMapper;
     @Autowired VehicleMapper vehicles;
     @Autowired AlertRuleEngine engine;
     @Autowired ObjectMapper json;
@@ -99,6 +116,10 @@ class AlertPersistenceIntegrationTest {
                     + " WHERE vehicle_id=? AND key_frame_path IS NOT NULL", String.class, vehicleId)) {
                 Files.deleteIfExists(uploads.resolve(file));
             }
+            for (String file : jdbc.queryForList("SELECT f.key_frame_path FROM alert_timeline_frame f"
+                    + " JOIN alert_record a ON a.id=f.alert_id WHERE a.vehicle_id=?", String.class, vehicleId)) {
+                Files.deleteIfExists(uploads.resolve(file));
+            }
             jdbc.update("DELETE FROM alert_record WHERE vehicle_id=?", vehicleId);
             jdbc.update("DELETE FROM recognition_record WHERE vehicle_id=?", vehicleId);
             jdbc.update("DELETE FROM alert_vehicle_state WHERE vehicle_id=?", vehicleId);
@@ -125,6 +146,128 @@ class AlertPersistenceIntegrationTest {
     }
 
     @Test
+    void timelineUsesAdjacentFramesAndChecksOwnershipForEveryImage() throws Exception {
+        for (int i = 0; i < 4; i++) { service.process(input(1, false), false); }
+        var alert = service.process(input(1, false), false).getFirst();
+        String url = "/api/alerts/" + alert.getId() + "/key-frames";
+        String owner = "Bearer " + jwt.generateToken(driverId, 0);
+        long adminId = jdbc.queryForObject("SELECT id FROM sys_user WHERE username='admin'", Long.class);
+        String admin = "Bearer " + jwt.generateToken(adminId, 0);
+        long otherId = insert("INSERT INTO sys_user(username,password,name,role) VALUES (?, 'unused', 'other', 'DRIVER')",
+                UUID.randomUUID().toString());
+        try {
+            mvc.perform(get(url).header("Authorization", owner)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.length()").value(2))
+                    .andExpect(jsonPath("$.data[0].offset").value(-1))
+                    .andExpect(jsonPath("$.data[1].offset").value(0));
+            mvc.perform(get(url + "/1").header("Authorization", owner)).andExpect(status().isNotFound());
+            var sample = input(0, false);
+            var next = new CapturedInference(sample.sourceKey(), sample.frameId(), sample.cameraId(), sample.vehicleId(),
+                    sample.driverId(), sample.capturedAt(), sample.pred(), sample.ood(), sample.maxP(), sample.energy(),
+                    sample.knnDist(), jpeg(0xffffff));
+            service.process(next, false);
+            service.process(next, false);
+            mvc.perform(get(url).header("Authorization", admin)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.length()").value(3))
+                    .andExpect(jsonPath("$.data[2].offset").value(1))
+                    .andExpect(jsonPath("$.data[2].url").value(url + "/1"))
+                    .andExpect(jsonPath("$.data[2].keyFramePath").doesNotExist());
+            mvc.perform(get(url + "/1").header("Authorization", owner)).andExpect(status().isOk())
+                    .andExpect(content().bytes(next.jpeg())).andExpect(header().string("Cache-Control", "no-store"));
+            mvc.perform(get(url + "/0").header("Authorization", owner)).andExpect(status().isOk())
+                    .andExpect(content().bytes(jpeg()));
+            mvc.perform(head(url + "/-1").header("Authorization", owner)).andExpect(status().isOk())
+                    .andExpect(content().string(""));
+            String other = "Bearer " + jwt.generateToken(otherId, 0);
+            mvc.perform(get(url).header("Authorization", other)).andExpect(status().isNotFound());
+            mvc.perform(get(url + "/1").header("Authorization", other)).andExpect(status().isNotFound());
+            mvc.perform(get(url + "/2").header("Authorization", owner)).andExpect(status().isBadRequest());
+            mvc.perform(get(url)).andExpect(status().isUnauthorized());
+            String after = timelineMapper.list(alert.getId()).getLast().keyFramePath();
+            Files.delete(uploads.resolve(after));
+            mvc.perform(get(url).header("Authorization", owner)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.length()").value(2))
+                    .andExpect(jsonPath("$.data[1].offset").value(0));
+            mvc.perform(get(url + "/1").header("Authorization", owner)).andExpect(status().isNotFound());
+        } finally { jdbc.update("DELETE FROM sys_user WHERE id=?", otherId); }
+    }
+
+    @Test
+    void unwritablePreviousFrameDoesNotRollBackTheTrigger() throws Exception {
+        timestamp = Instant.parse("2026-11-19T15:59:59.996Z").toEpochMilli();
+        Path blocked = uploads.resolve("alerts/2026/11/19");
+        Files.createDirectories(blocked.getParent());
+        Files.writeString(blocked, "not a directory");
+        try {
+            for (int i = 0; i < 4; i++) { service.process(input(1, false), false); }
+            var alert = service.process(input(1, false), false).getFirst();
+            assertThat(count("recognition_record")).isEqualTo(5);
+            assertThat(Files.isRegularFile(uploads.resolve(alert.getKeyFramePath()))).isTrue();
+            assertThat(timelineMapper.list(alert.getId())).isEmpty();
+            service.process(input(0, false), false);
+            assertThat(timelineMapper.list(alert.getId())).extracting(entity.AlertTimelineFrame::frameOffset)
+                    .containsExactly(1);
+        } finally { Files.deleteIfExists(blocked); }
+    }
+
+    @Test
+    void nextTransactionWaitsUntilTheCommittedFrameIsPublishedToTheCache() throws Exception {
+        for (int i = 0; i < 4; i++) { service.process(input(1, false), false); }
+        var trigger = input(1, false);
+        var next = input(0, false);
+        var committed = new CountDownLatch(1);
+        var publish = new CountDownLatch(1);
+        try (var threads = Executors.newFixedThreadPool(2)) {
+            var first = threads.submit(() -> new TransactionTemplate(transactions).execute(status -> {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        committed.countDown();
+                        try {
+                            if (!publish.await(5, TimeUnit.SECONDS)) { throw new IllegalStateException("Commit latch timeout"); }
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException(interrupted);
+                        }
+                    }
+                });
+                try { return service.process(trigger, false).getFirst(); }
+                catch (IOException e) { throw new UncheckedIOException(e); }
+            }));
+            try {
+                assertThat(committed.await(5, TimeUnit.SECONDS)).isTrue();
+                var started = new CountDownLatch(1);
+                var second = threads.submit(() -> {
+                    started.countDown();
+                    return service.process(next, false);
+                });
+                assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThatThrownBy(() -> second.get(300, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+                publish.countDown();
+                second.get(5, TimeUnit.SECONDS);
+                var alert = first.get(5, TimeUnit.SECONDS);
+                assertThat(timelineMapper.list(alert.getId())).extracting(entity.AlertTimelineFrame::frameOffset)
+                        .containsExactly(-1, 1);
+            } finally { publish.countDown(); }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"driver", "break", "gap"})
+    void timelineOnlyUsesContinuousFramesForTheSameDriver(String reason) throws Exception {
+        for (int i = 0; i < 4; i++) { service.process(input(1, false), false); }
+        var alert = service.process(input(1, false), false).getFirst();
+        var next = input(0, false);
+        long time = reason.equals("gap") ? next.capturedAt() + 30_000 : next.capturedAt();
+        var candidate = new CapturedInference(next.sourceKey(), next.frameId(), next.cameraId(), next.vehicleId(),
+                reason.equals("driver") ? null : driverId, time, next.pred(), next.ood(), next.maxP(), next.energy(),
+                next.knnDist(), next.jpeg());
+        service.process(candidate, reason.equals("break"));
+        assertThat(timelineMapper.list(alert.getId())).extracting(entity.AlertTimelineFrame::frameOffset)
+                .containsExactly(-1);
+    }
+
+    @Test
     void duplicateInputDoesNotDoubleCountOrResend() throws Exception {
         for (int i = 0; i < 4; i++) { service.process(input(1, false), false); }
         CapturedInference fifth = input(1, false);
@@ -138,7 +281,8 @@ class AlertPersistenceIntegrationTest {
     @Test
     void stateRestoresIntoNewServiceInstance() throws Exception {
         for (int i = 0; i < 4; i++) { service.process(input(1, false), false); }
-        AlertDecisionService restarted = new AlertDecisionService(mapper, vehicles, speed, engine, json, keyFrames);
+        AlertDecisionService restarted = new AlertDecisionService(mapper, vehicles, speed, engine, json, keyFrames,
+                new AlertTimelineCapture(timelineMapper, keyFrames));
         CapturedInference fifth = input(3, false);
         List<AlertRecord> alerts = new TransactionTemplate(transactions).execute(status -> {
             try { return restarted.process(fifth, false); }
@@ -227,7 +371,7 @@ class AlertPersistenceIntegrationTest {
         try {
             inferProperties.setFastapiUrl("http://127.0.0.1:" + server.getAddress().getPort() + "/predict");
             for (int i = 0; i < 5; i++) {
-                queue.offer(new InferFrame(i, 1L, vehicleId, driverId, timestamp++, jpeg()));
+                queue.offer(new InferFrame(i, vehicleId, vehicleId, driverId, timestamp++, jpeg()));
             }
             await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
                 assertThat(count("recognition_record")).isEqualTo(5);
@@ -243,13 +387,19 @@ class AlertPersistenceIntegrationTest {
     }
 
     private CapturedInference input(int pred, boolean ood) throws IOException {
-        return new CapturedInference(UUID.randomUUID().toString(), timestamp, 1L, vehicleId,
+        return new CapturedInference(UUID.randomUUID().toString(), timestamp, vehicleId, vehicleId,
                 driverId, timestamp++, pred, ood, .99, -3, .1, jpeg());
     }
 
     private byte[] jpeg() throws IOException {
+        return jpeg(0);
+    }
+
+    private byte[] jpeg(int rgb) throws IOException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        ImageIO.write(new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB), "jpg", bytes);
+        var image = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB);
+        image.setRGB(0, 0, rgb);
+        ImageIO.write(image, "jpg", bytes);
         return bytes.toByteArray();
     }
 
@@ -274,7 +424,7 @@ class AlertPersistenceIntegrationTest {
 
     static class MutableSpeed implements VehicleSpeedProvider {
         volatile Double value = 20.0;
-        @Override public Double speedKmh(Long vehicleId, long capturedAt) { return value; }
+        @Override public Double speedKmh(Long vehicleId, Long driverId, long capturedAt) { return value; }
     }
 
     @TestConfiguration
