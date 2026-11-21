@@ -15,3 +15,5 @@ curl.exe -N -H "Authorization: Bearer <token>" -H "Accept: text/event-stream" ht
 ```
 
 使用现有告警记录表，无需数据库迁移。本阶段只提供在线页面的实时事件。
+
+平台管理员还可收到 `event: vehicle-offline`，详见[车辆定位与车速上报](vehicle-telemetry.md)。

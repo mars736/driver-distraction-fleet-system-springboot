@@ -17,6 +17,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import service.alert.AlertDecisionService;
 import service.alert.CapturedInference;
+import service.telemetry.VehicleOfflineNotifier;
+import mapper.VehicleMapper;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -26,7 +28,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.sql.Statement;
 import java.time.Duration;
 import java.util.Scanner;
 import java.util.UUID;
@@ -35,7 +36,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @EnabledIfEnvironmentVariable(named = "DRIVER_FLEET_DB_TESTS", matches = "true")
 @SpringBootTest(classes = DriverDistractionFleetSystemSpringbootApplication.class,
-        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "telemetry.offline-monitor.enabled=false")
 @Timeout(25)
 class AlertLiveStreamIntegrationTest {
     @LocalServerPort int port;
@@ -44,6 +46,8 @@ class AlertLiveStreamIntegrationTest {
     @Autowired ObjectMapper json;
     @Autowired AlertDecisionService decision;
     @Autowired PlatformTransactionManager transactions;
+    @Autowired VehicleOfflineNotifier offlineNotifier;
+    @Autowired VehicleMapper vehicles;
     private long fleet;
     private long driverA;
     private long driverB;
@@ -66,7 +70,9 @@ class AlertLiveStreamIntegrationTest {
         if (http != null) { http.shutdownNow(); }
         jdbc.update("DELETE FROM alert_record WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM recognition_record WHERE fleet_id=?", fleet);
-        jdbc.update("DELETE s FROM alert_vehicle_state s JOIN vehicle v ON v.id=s.vehicle_id WHERE v.fleet_id=?", fleet);
+        jdbc.update("DELETE FROM alert_vehicle_state WHERE vehicle_id IN (SELECT id FROM vehicle WHERE fleet_id=?)", fleet);
+        jdbc.update("DELETE FROM vehicle_offline_notice WHERE vehicle_id IN (SELECT id FROM vehicle WHERE fleet_id=?)", fleet);
+        jdbc.update("DELETE FROM vehicle_telemetry WHERE vehicle_id IN (SELECT id FROM vehicle WHERE fleet_id=?)", fleet);
         jdbc.update("DELETE FROM sys_user WHERE id IN (?,?,?,?)", driverA, driverB, admin, unknownRole);
         jdbc.update("DELETE FROM vehicle WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM fleet WHERE id=?", fleet);
@@ -158,6 +164,41 @@ class AlertLiveStreamIntegrationTest {
         }
     }
 
+    @Test
+    void reportsOfflineOnlyToAdminsAndOnlyOncePerStalePosition() throws Exception {
+        long vehicleId = insert("INSERT INTO vehicle(fleet_id,plate_no) VALUES (?,?)", fleet, "O" + key());
+        jdbc.update("UPDATE sys_user SET vehicle_id=? WHERE id=?", vehicleId, driverA);
+        var vehicle = vehicles.selectById(vehicleId);
+        long now = System.currentTimeMillis();
+        long oldSample = now - 30_000;
+        jdbc.update("INSERT INTO vehicle_telemetry VALUES (?, ?, ?, 24.48, 118.08, 12)", vehicleId, driverA, oldSample);
+        try (var all = subscribe(admin); var driver = subscribe(driverA)) {
+            offlineNotifier.notifyIfStillOffline(vehicle, driverA, now);
+            offlineNotifier.notifyIfStillOffline(vehicle, driverA, now);
+            assertThat(nextEvent(all, "vehicle-offline").path("vehicleId").asLong()).isEqualTo(vehicleId);
+
+            long newSample = now - 1000;
+            jdbc.update("INSERT INTO vehicle_telemetry VALUES (?, ?, ?, 24.48, 118.08, 12)", vehicleId, driverA, newSample);
+            offlineNotifier.notifyIfStillOffline(vehicle, driverA, now);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM vehicle_offline_notice WHERE vehicle_id=?",
+                    Long.class, vehicleId)).isEqualTo(1);
+
+            offlineNotifier.notifyIfStillOffline(vehicle, driverA, now + 20_000);
+            assertThat(nextEvent(all, "vehicle-offline").path("sampledAt").asLong()).isEqualTo(newSample);
+            fire(input(driverA));
+            assertThat(nextAlert(driver)).isEqualTo(newestAlert(driverA));
+        }
+    }
+
+    private com.fasterxml.jackson.databind.JsonNode nextEvent(Scanner scanner, String event) throws Exception {
+        while (scanner.hasNextLine()) {
+            if (scanner.nextLine().equals("event:" + event)) {
+                return json.readTree(scanner.nextLine().substring(5));
+            }
+        }
+        throw new AssertionError("事件流提前关闭");
+    }
+
     private Scanner subscribe(long userId) throws Exception {
         var response = http.send(request("/api/alerts/stream", userId).header("Accept", "text/event-stream").build(),
                 HttpResponse.BodyHandlers.ofInputStream());
@@ -220,7 +261,7 @@ class AlertLiveStreamIntegrationTest {
     private long insert(String sql, Object... arguments) {
         var keys = new GeneratedKeyHolder();
         jdbc.update(connection -> {
-            var statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
+            var statement = connection.prepareStatement(sql, new String[]{"id"});
             for (int index = 0; index < arguments.length; index++) { statement.setObject(index + 1, arguments[index]); }
             return statement;
         }, keys);

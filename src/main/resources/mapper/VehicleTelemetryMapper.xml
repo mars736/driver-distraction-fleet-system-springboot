@@ -24,4 +24,43 @@
         ORDER BY sampled_at DESC
         LIMIT 1
     </select>
+    <sql id="latestPositions">
+        SELECT vehicle_id, driver_id, sampled_at, latitude, longitude, speed_kmh
+        FROM (
+            SELECT v.id AS vehicle_id, u.id AS driver_id, t.sampled_at, t.latitude, t.longitude, t.speed_kmh,
+                   ROW_NUMBER() OVER (PARTITION BY v.id ORDER BY t.sampled_at DESC, u.id DESC) AS rn
+            FROM vehicle v
+            JOIN sys_user u ON u.vehicle_id = v.id AND u.fleet_id = v.fleet_id
+              AND u.role = 'DRIVER' AND u.enabled = 1
+            JOIN vehicle_telemetry t ON t.vehicle_id = v.id AND t.driver_id = u.id
+              AND t.sampled_at = (
+                  SELECT MAX(latest.sampled_at)
+                  FROM vehicle_telemetry latest
+                  WHERE latest.vehicle_id = v.id AND latest.driver_id = u.id
+              )
+            WHERE v.id IN
+            <foreach collection="vehicleIds" item="vehicleId" open="(" separator="," close=")">
+                #{vehicleId}
+            </foreach>
+        ) positions
+        WHERE rn = 1
+    </sql>
+
+    <select id="findLatestPositions" resultType="vo.telemetry.VehiclePosition">
+        <include refid="latestPositions"/>
+    </select>
+
+    <select id="findOfflineCandidates" resultType="vo.telemetry.VehiclePosition">
+        <include refid="latestPositions"/>
+          AND sampled_at &lt; #{cutoff}
+          AND NOT EXISTS (
+              SELECT 1 FROM vehicle_offline_notice n
+              WHERE n.vehicle_id = positions.vehicle_id AND n.driver_id = positions.driver_id
+                AND n.last_sampled_at = positions.sampled_at
+          )
+    </select>
+    <insert id="claimOfflineNotice">
+        INSERT IGNORE INTO vehicle_offline_notice (vehicle_id, driver_id, last_sampled_at, detected_at)
+        VALUES (#{vehicleId}, #{driverId}, #{sampledAt}, #{detectedAt})
+    </insert>
 </mapper>
