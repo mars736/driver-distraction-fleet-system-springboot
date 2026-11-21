@@ -31,6 +31,7 @@ public class AlertDecisionService {
     private final ObjectMapper objectMapper;
     private final KeyFrameStore keyFrameStore;
     private final AlertTimelineCapture timelineCapture;
+    private final ApplicationEventPublisher events;
 
     /** 锁定车辆状态，识别记录、告警和计数一起提交；重试不会重复累计。 */
     @Transactional(rollbackFor = Exception.class)

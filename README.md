@@ -12,7 +12,11 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    USE driver_fleet;
    ```
 
-   再执行 `src/main/resources/db/schema.sql`，创建十二张业务表。已有数据库可重复执行该脚本增加缺失表。已经部署申诉模块的库，启动本版本前执行 `src/main/resources/db/migrations/20261120_alert_key_frame_timeline.sql` 即可。建表脚本不会自动执行。
+   新库执行 `src/main/resources/db/schema.sql`，创建十三张业务表。已有申诉模块的数据库按顺序执行以下迁移，补齐定位表、关键帧时间线表和工作台索引。更旧的数据库先执行告警复核及申诉迁移。应用启动时不会自动执行这些脚本。
+
+   - `src/main/resources/db/migrations/20261119_vehicle_telemetry.sql`
+   - `src/main/resources/db/migrations/20261120_alert_key_frame_timeline.sql`
+   - `src/main/resources/db/migrations/20261120_dashboard_indexes.sql`
 3. 在 `src/main/resources/application.yml` 中配置 `spring.datasource` 的地址、用户名和密码。启动前必须完成建库、建表，因为应用初始化时会查询摄像头表。
 4. 在项目根目录执行：
 
@@ -20,7 +24,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    .\mvnw.cmd spring-boot:run
    ```
 
-   macOS / Linux 使用 `./mvnw spring-boot:run`。默认端口为 8080。首次启动会创建默认车队和管理员 `admin / admin123`。
+   macOS / Linux 使用 `bash ./mvnw spring-boot:run`。默认端口为 8080。首次启动会创建默认车队和管理员 `admin / admin123`。
 
 登录接口为 `POST /api/auth/login`，JSON 请求字段为 `account` 和 `password`。登录成功后，后续请求使用 `Authorization: Bearer <token>`。
 
@@ -57,7 +61,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 # 权限和进程生命周期回归测试，不需要 MySQL、FFmpeg 或推理服务
 .\mvnw.cmd "-Dtest=CameraSecurityTest,FfmpegManagerTest" test
 
-# 全部常规测试：现有 contextLoads 测试需要配置可用的 MySQL 和上述十二张表
+# 全部常规测试：现有 contextLoads 测试需要配置可用的 MySQL 和上述十三张表
 .\mvnw.cmd test
 ```
 
