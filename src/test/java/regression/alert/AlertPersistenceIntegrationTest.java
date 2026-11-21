@@ -284,7 +284,7 @@ class AlertPersistenceIntegrationTest {
     void stateRestoresIntoNewServiceInstance() throws Exception {
         for (int i = 0; i < 4; i++) { service.process(input(1, false), false); }
         AlertDecisionService restarted = new AlertDecisionService(mapper, vehicles, speed, engine, json, keyFrames,
-                new AlertTimelineCapture(timelineMapper, keyFrames));
+                new AlertTimelineCapture(timelineMapper, keyFrames), event -> {});
         CapturedInference fifth = input(3, false);
         List<AlertRecord> alerts = new TransactionTemplate(transactions).execute(status -> {
             try { return restarted.process(fifth, false); }

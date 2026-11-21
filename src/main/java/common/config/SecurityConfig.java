@@ -2,6 +2,7 @@ package common.config;
 
 import common.security.JwtAuthFilter;
 import common.security.SecurityResponseWriter;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -64,6 +65,9 @@ public class SecurityConfig {
                     securityResponseWriter.write(response, HttpServletResponse.SC_FORBIDDEN, "无权限访问"))
             )
             .authorizeHttpRequests(auth -> auth
+                // SSE 初次连接仍需认证，异步收尾转发不会创建新订阅。
+                .requestMatchers(request -> request.getDispatcherType() == DispatcherType.ASYNC
+                        && request.getRequestURI().equals(request.getContextPath() + "/api/alerts/stream")).permitAll()
                 .requestMatchers(
                         "/api/auth/login",
                         "/api/auth/register",
