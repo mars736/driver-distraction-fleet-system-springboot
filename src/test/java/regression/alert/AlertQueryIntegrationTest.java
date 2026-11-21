@@ -26,6 +26,7 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -41,6 +42,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(classes = DriverDistractionFleetSystemSpringbootApplication.class)
 @AutoConfigureMockMvc
 class AlertQueryIntegrationTest {
+    private static final String EXPORT = "/api/alerts/export";
     @TempDir static Path uploads;
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -115,6 +117,95 @@ class AlertQueryIntegrationTest {
         mvc.perform(get("/api/alerts").header("Authorization", adminToken).param("fleetId", "" + fleetB))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(1))
                 .andExpect(jsonPath("$.data.list[0].id").value(otherDriver));
+    }
+
+    @Test
+    void reportMatchesListFiltersAndSortOrderWithoutApplyingPagination() throws Exception {
+        jdbc.update("UPDATE alert_record SET status='CONFIRMED' WHERE id IN (?, ?)", simulated, backlog);
+        var filters = new org.springframework.util.LinkedMultiValueMap<String, String>();
+        filters.add("fleetId", String.valueOf(fleetA));
+        filters.add("vehicleId", String.valueOf(vehicleA));
+        filters.add("driverId", String.valueOf(driverA));
+        filters.add("startTime", "2026-11-11T10:00:00");
+        filters.add("endTime", "2026-11-11T11:00:00");
+        filters.add("status", "CONFIRMED");
+        mvc.perform(get("/api/alerts").params(filters).param("pageSize", "1").header("Authorization", adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(2))
+                .andExpect(jsonPath("$.data.list[0].id").value(backlog));
+        var result = mvc.perform(get(EXPORT).params(filters).param("pageSize", "1").header("Authorization", adminToken)
+                        .accept("text/csv"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("text/csv;charset=UTF-8"))
+                .andExpect(header().string("Content-Disposition", "attachment; filename=\"alerts.csv\""))
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andReturn().getResponse();
+        String csv = result.getContentAsString(StandardCharsets.UTF_8);
+        assertThat(csv.lines().toList()).hasSize(3);
+        assertThat(csv.lines().skip(1).map(line -> line.substring(0, line.indexOf(','))).toList())
+                .containsExactly("\"" + backlog + "\"", "\"" + simulated + "\"");
+        assertThat(csv).startsWith("\uFEFF\"告警ID\"").doesNotContain(relativeImage, "fixture-account-no-login");
+    }
+
+    @Test
+    void reportEscapesSpreadsheetFormulasAndCsvSpecialCharacters() throws Exception {
+        jdbc.update("UPDATE sys_user SET name=? WHERE id=?", "  ＝1+1", driverA);
+        jdbc.update("UPDATE fleet SET name=? WHERE id=?", "试验,\"甲\"\n第二行", fleetA);
+        var result = mvc.perform(get(EXPORT)
+                        .param("fleetId", String.valueOf(fleetA)).param("recordType", "SMS_ALERT").param("behaviorCode", "c1")
+                        .header("Authorization", adminToken))
+                .andExpect(status().isOk()).andReturn().getResponse();
+        assertThat(result.getContentAsString(StandardCharsets.UTF_8))
+                .contains("\"'  ＝1+1\"", "\"试验,\"\"甲\"\"\n第二行\"", "\"" + simulated + "\"")
+                .doesNotContain("\"" + sent + "\",\"2026-11-11T11:00:00");
+    }
+
+    @Test
+    void reportEnforcesAuthorizationAndReturnsJsonErrorsAndHeaderOnlyForEmptyResult() throws Exception {
+        mvc.perform(get(EXPORT).accept("text/csv")).andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401));
+        mvc.perform(get(EXPORT).header("Authorization", driverToken).accept("text/csv"))
+                .andExpect(status().isForbidden()).andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.code").value(403)).andExpect(header().doesNotExist("Content-Disposition"));
+        mvc.perform(get(EXPORT).header("Authorization", driverToken).accept(MediaType.APPLICATION_JSON).param("fleetId", "-1"))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value(403));
+        mvc.perform(head(EXPORT).header("Authorization", driverToken))
+                .andExpect(status().isForbidden()).andExpect(header().doesNotExist("Content-Disposition"));
+        mvc.perform(get(EXPORT).header("Authorization", adminToken).accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isNotAcceptable()).andExpect(jsonPath("$.code").value(406));
+        mvc.perform(get(EXPORT).header("Authorization", adminToken).accept("text/csv")
+                        .param("startTime", "2026-11-11T11:00:00").param("endTime", "2026-11-11T10:00:00"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value(400));
+        var empty = mvc.perform(get(EXPORT).header("Authorization", adminToken)
+                        .param("fleetId", String.valueOf(Long.MAX_VALUE)))
+                .andExpect(status().isOk()).andReturn().getResponse();
+        assertThat(empty.getContentAsString(StandardCharsets.UTF_8).lines().count()).isEqualTo(1);
+    }
+
+    @Test
+    void reportRejectsMoreThanTenThousandRowsInsteadOfDownloadingTruncatedData() throws Exception {
+        long recognitionStart = 10_000_000_000L;
+        try {
+            // 通过 SQL 批量造出 10000 条告警，车队 B 原有一条，共 10001 条。
+            jdbc.update("""
+                    INSERT INTO alert_record(recognition_id, vehicle_id, driver_id, fleet_id, captured_at,
+                        record_type, sms_status, status)
+                    WITH RECURSIVE digits(n) AS (SELECT 0 UNION ALL SELECT n+1 FROM digits WHERE n < 9)
+                    SELECT ? + a.n*1000 + b.n*100 + c.n*10 + d.n, ?, ?, ?, '2026-11-11 10:00:00',
+                           'BACKLOG', 'NOT_REQUIRED', 'OPEN'
+                    FROM digits a CROSS JOIN digits b CROSS JOIN digits c CROSS JOIN digits d
+                    """, recognitionStart, vehicleB, driverB, fleetB);
+            mvc.perform(get(EXPORT).header("Authorization", adminToken).accept("text/csv").param("fleetId", "" + fleetB))
+                    .andExpect(status().is(422)).andExpect(jsonPath("$.code").value(422))
+                    .andExpect(header().doesNotExist("Content-Disposition"));
+            jdbc.update("DELETE FROM alert_record WHERE fleet_id=? AND recognition_id=?", fleetB, recognitionStart);
+            var atLimit = mvc.perform(get(EXPORT).header("Authorization", adminToken).param("fleetId", "" + fleetB))
+                    .andExpect(status().isOk()).andReturn().getResponse();
+            assertThat(atLimit.getContentAsString(StandardCharsets.UTF_8).lines().count()).isEqualTo(10_001);
+        } finally {
+            jdbc.update("DELETE FROM alert_record WHERE fleet_id=? AND recognition_id BETWEEN ? AND ?",
+                    fleetB, recognitionStart, recognitionStart + 9999);
+        }
     }
 
     @Test

@@ -2,23 +2,12 @@ package dto.alert;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.Positive;
-import jakarta.validation.constraints.Size;
 import lombok.Data;
-import service.alert.rule.AlertKind;
-import service.alert.AlertStatus;
+import lombok.EqualsAndHashCode;
 
 @Data
-public class AlertQueryRequest {
-    @Positive private Long fleetId;
-    @Positive private Long vehicleId;
-    @Positive private Long driverId;
-    @Pattern(regexp = "c[0-9]") private String behaviorCode;
-    private AlertKind recordType;
-    private AlertStatus status;
-    @Size(max = 40) private String startTime;
-    @Size(max = 40) private String endTime;
+@EqualsAndHashCode(callSuper = true)
+public class AlertQueryRequest extends AlertFilterRequest {
     @Min(1) private int page = 1;
     @Min(1) @Max(100) private int pageSize = 10;
 }

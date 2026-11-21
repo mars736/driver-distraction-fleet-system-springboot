@@ -5,6 +5,7 @@ import common.exception.BusinessException;
 import common.response.PageResult;
 import common.security.LoginUser;
 import common.security.UserContext;
+import dto.alert.AlertFilterRequest;
 import dto.alert.AlertQueryRequest;
 import mapper.AlertQueryMapper;
 import mapper.AlertTimelineMapper;
@@ -26,6 +27,7 @@ import java.util.List;
 
 @Service
 public class AlertQueryService {
+    private static final int MAX_EXPORT_ROWS = 10_000;
     private final AlertQueryMapper mapper;
     private final AlertTimelineMapper timelineMapper;
     private final Path uploadRoot;
@@ -39,19 +41,35 @@ public class AlertQueryService {
 
     @Transactional(readOnly = true)
     public PageResult<AlertView> list(AlertQueryRequest request) {
-        Long owner = ownerDriverId();
-        LocalDateTime start = parseTime(request.getStartTime());
-        LocalDateTime end = parseTime(request.getEndTime());
-        if (start != null && end != null && !start.isBefore(end)) {
-            throw new BusinessException(400, "startTime 必须早于 endTime");
-        }
-        AlertQueryFilter filter = new AlertQueryFilter(request.getFleetId(), request.getVehicleId(),
-                request.getDriverId(), owner, request.getBehaviorCode(), request.getRecordType(), request.getStatus(), start, end);
+        AlertQueryFilter filter = filter(request, ownerDriverId());
         long total = mapper.count(filter);
         long offset = ((long) request.getPage() - 1) * request.getPageSize();
         var rows = mapper.list(filter, offset, request.getPageSize());
         rows.forEach(this::decorate);
         return PageResult.of(rows, total, request.getPage(), request.getPageSize());
+    }
+
+    @Transactional(readOnly = true)
+    public List<AlertView> exportRows(AlertFilterRequest request) {
+        if (!CommonConstant.ROLE_PLATFORM_ADMIN.equals(UserContext.get().role())) {
+            throw new BusinessException(403, "仅管理员可以导出告警报表");
+        }
+        // 多读一行判断是否超限，用同一条查询避免总数和下载内容出现并发差异。
+        var rows = mapper.list(filter(request, null), 0, MAX_EXPORT_ROWS + 1);
+        if (rows.size() > MAX_EXPORT_ROWS) {
+            throw new BusinessException(422, "报表超过 " + MAX_EXPORT_ROWS + " 条，请缩小筛选范围");
+        }
+        return rows;
+    }
+
+    private AlertQueryFilter filter(AlertFilterRequest request, Long owner) {
+        LocalDateTime start = parseTime(request.getStartTime());
+        LocalDateTime end = parseTime(request.getEndTime());
+        if (start != null && end != null && !start.isBefore(end)) {
+            throw new BusinessException(400, "startTime 必须早于 endTime");
+        }
+        return new AlertQueryFilter(request.getFleetId(), request.getVehicleId(),
+                request.getDriverId(), owner, request.getBehaviorCode(), request.getRecordType(), request.getStatus(), start, end);
     }
 
     public AlertView detail(long id) {
