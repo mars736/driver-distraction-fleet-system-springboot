@@ -38,6 +38,8 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 
 管理员可通过 `POST /api/alerts/{id}/reviews` 确认或撤销待处理告警；`GET /api/alerts/{id}/reviews` 查看处理历史。状态和历史同事务提交，重复或并发覆盖返回 409。数据库升级和接口示例见 [告警处理说明](docs/alert-review.md)。
 
+识别记录查询提供 `GET /api/recognitions`、`GET /api/recognitions/{id}` 和鉴权关键帧读取，支持时间、车队、车辆、司机、摄像头、行为类别、OOD 和参与状态筛选，并返回关联告警及最新申诉摘要。管理员查看全部，司机仅查看本人；用法见 [识别查询说明](docs/recognition-query.md)。
+
 司机可通过 `/api/appeals` 对本人告警或普通分心记录提交申诉、补充文字和材料、撤回待复核申诉；管理员可复核确认或撤销。申诉历史与材料均按归属鉴权，待复核时禁止原处理入口覆盖告警。接口和状态流转见 [申诉说明](docs/alert-appeal.md)。评分回补尚未接入。
 
 未登录、无效或过期 token 返回 HTTP 401；已登录但权限不足返回 HTTP 403。两者均使用 `{ "code": ..., "message": "...", "data": null }` 格式。

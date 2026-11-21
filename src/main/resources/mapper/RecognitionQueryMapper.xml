@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.RecognitionQueryMapper">
+    <sql id="filters">
+        <where>
+            <!-- 服务端归属条件和前端筛选条件同时成立，后者不能替换前者。 -->
+            <if test="filter.ownerDriverId != null">AND r.driver_id=#{filter.ownerDriverId}</if>
+            <if test="filter.fleetId != null">AND r.fleet_id=#{filter.fleetId}</if>
+            <if test="filter.vehicleId != null">AND r.vehicle_id=#{filter.vehicleId}</if>
+            <if test="filter.driverId != null">AND r.driver_id=#{filter.driverId}</if>
+            <if test="filter.cameraId != null">AND r.camera_id=#{filter.cameraId}</if>
+            <if test="filter.behaviorCode != null">AND r.behavior_code=#{filter.behaviorCode}</if>
+            <if test="filter.ood != null">AND r.ood=#{filter.ood}</if>
+            <if test="filter.participated != null">AND r.participated=#{filter.participated}</if>
+            <if test="filter.startTime != null">AND r.captured_at &gt;= #{filter.startTime}</if>
+            <if test="filter.endTime != null">AND r.captured_at &lt; #{filter.endTime}</if>
+        </where>
+    </sql>
+    <sql id="columns">
+        r.id,r.camera_id,r.vehicle_id,v.plate_no,r.driver_id,u.name AS driver_name,r.fleet_id,f.name AS fleet_name,
+        r.captured_at,r.pred,r.behavior_code,r.max_p,r.energy,r.knn_dist,r.ood,r.participated,r.decision_reason,
+        r.speed_kmh,r.speed_status,r.key_frame_path,r.create_time,r.update_time
+    </sql>
+    <sql id="joins">
+        FROM recognition_record r
+        LEFT JOIN vehicle v ON v.id=r.vehicle_id
+        LEFT JOIN sys_user u ON u.id=r.driver_id
+        LEFT JOIN fleet f ON f.id=r.fleet_id
+    </sql>
+    <select id="count" resultType="long">
+        SELECT COUNT(*) FROM recognition_record r <include refid="filters"/>
+    </select>
+    <select id="list" resultType="vo.recognition.RecognitionView">
+        SELECT <include refid="columns"/> <include refid="joins"/> <include refid="filters"/>
+        ORDER BY r.captured_at DESC,r.id DESC LIMIT #{limit} OFFSET #{offset}
+    </select>
+    <select id="findAccessible" resultType="vo.recognition.RecognitionView">
+        SELECT <include refid="columns"/> <include refid="joins"/> WHERE r.id=#{id}
+        <if test="owner != null">AND r.driver_id=#{owner}</if>
+    </select>
+    <sql id="pageIds"><foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach></sql>
+    <!-- 先给识别记录分页，再批量查本页关联数据。一帧的多个告警/多次申诉不会放大总数。 -->
+    <select id="linkedAlerts" resultType="vo.recognition.RecognitionAlertView">
+        SELECT recognition_id,id,record_type,behavior_code,status,sms_status FROM alert_record
+        WHERE recognition_id IN <include refid="pageIds"/>
+        <if test="owner != null">AND driver_id=#{owner}</if>
+        ORDER BY id ASC
+    </select>
+    <select id="latestAppeals" resultType="vo.recognition.RecognitionAppealView">
+        SELECT CASE WHEN p.target_type='RECOGNITION' THEN p.target_id ELSE a.recognition_id END AS recognition_id,
+               p.id,p.target_type,p.target_id,p.status,p.decision_reason,p.reviewed_at
+        FROM alert_appeal p LEFT JOIN alert_record a ON p.target_type='ALERT' AND a.id=p.target_id
+        WHERE ((p.target_type='RECOGNITION' AND p.target_id IN <include refid="pageIds"/>)
+           OR (p.target_type='ALERT' AND a.recognition_id IN <include refid="pageIds"/>))
+        <if test="owner != null">AND p.driver_id=#{owner}</if>
+        AND p.id=(SELECT MAX(p2.id) FROM alert_appeal p2 WHERE p2.target_type=p.target_type AND p2.target_id=p.target_id)
+        ORDER BY p.id ASC
+    </select>
+</mapper>
