@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.VehicleTelemetryMapper">
+    <select id="lockDriverBinding" resultType="java.lang.Long">
+        SELECT u.id
+        FROM sys_user u
+        JOIN vehicle v ON v.id = u.vehicle_id AND v.fleet_id = u.fleet_id
+        WHERE u.id = #{driverId} AND v.id = #{vehicleId}
+          AND u.role = 'DRIVER' AND u.enabled = 1
+        FOR UPDATE
+    </select>
+
+    <insert id="insertSample">
+        INSERT INTO vehicle_telemetry (vehicle_id, driver_id, sampled_at, latitude, longitude, speed_kmh)
+        VALUES (#{vehicleId}, #{driverId}, #{sampledAt}, #{latitude}, #{longitude}, #{speedKmh,jdbcType=DOUBLE})
+        ON DUPLICATE KEY UPDATE sampled_at = vehicle_telemetry.sampled_at
+    </insert>
+
+    <select id="findSpeedAt" resultType="java.lang.Double">
+        SELECT speed_kmh
+        FROM vehicle_telemetry
+        WHERE vehicle_id = #{vehicleId} AND driver_id = #{driverId}
+          AND sampled_at BETWEEN #{earliest} AND #{capturedAt}
+        ORDER BY sampled_at DESC
+        LIMIT 1
+    </select>
+</mapper>

@@ -274,7 +274,7 @@ class AlertPersistenceIntegrationTest {
 
     static class MutableSpeed implements VehicleSpeedProvider {
         volatile Double value = 20.0;
-        @Override public Double speedKmh(Long vehicleId, long capturedAt) { return value; }
+        @Override public Double speedKmh(Long vehicleId, Long driverId, long capturedAt) { return value; }
     }
 
     @TestConfiguration

@@ -18,12 +18,6 @@ public class AlertConfiguration {
     }
 
     @Bean
-    @ConditionalOnMissingBean(VehicleSpeedProvider.class)
-    public VehicleSpeedProvider unknownVehicleSpeedProvider() {
-        return (vehicleId, capturedAt) -> null;
-    }
-
-    @Bean
     @ConditionalOnMissingBean(SmsSender.class)
     public SmsSender loggingSmsSender() {
         return (alert, phone) -> {
