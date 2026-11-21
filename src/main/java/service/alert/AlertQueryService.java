@@ -5,12 +5,15 @@ import common.exception.BusinessException;
 import common.response.PageResult;
 import common.security.LoginUser;
 import common.security.UserContext;
+import dto.alert.AlertFilterRequest;
 import dto.alert.AlertQueryRequest;
 import mapper.AlertQueryMapper;
+import mapper.AlertTimelineMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import vo.alert.AlertView;
+import vo.alert.AlertTimelineItem;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -18,32 +21,55 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 
 @Service
 public class AlertQueryService {
+    private static final int MAX_EXPORT_ROWS = 10_000;
     private final AlertQueryMapper mapper;
+    private final AlertTimelineMapper timelineMapper;
     private final Path uploadRoot;
 
-    public AlertQueryService(AlertQueryMapper mapper, @Value("${file.upload-dir:./upload}") String uploadDir) {
+    public AlertQueryService(AlertQueryMapper mapper, AlertTimelineMapper timelineMapper,
+            @Value("${file.upload-dir:./upload}") String uploadDir) {
         this.mapper = mapper;
+        this.timelineMapper = timelineMapper;
         uploadRoot = Path.of(uploadDir).toAbsolutePath().normalize();
     }
 
     @Transactional(readOnly = true)
     public PageResult<AlertView> list(AlertQueryRequest request) {
-        Long owner = ownerDriverId();
-        LocalDateTime start = parseTime(request.getStartTime());
-        LocalDateTime end = parseTime(request.getEndTime());
-        if (start != null && end != null && !start.isBefore(end)) {
-            throw new BusinessException(400, "startTime 必须早于 endTime");
-        }
-        AlertQueryFilter filter = new AlertQueryFilter(request.getFleetId(), request.getVehicleId(),
-                request.getDriverId(), owner, request.getBehaviorCode(), request.getRecordType(), request.getStatus(), start, end);
+        AlertQueryFilter filter = filter(request, ownerDriverId());
         long total = mapper.count(filter);
         long offset = ((long) request.getPage() - 1) * request.getPageSize();
         var rows = mapper.list(filter, offset, request.getPageSize());
         rows.forEach(this::decorate);
         return PageResult.of(rows, total, request.getPage(), request.getPageSize());
+    }
+
+    @Transactional(readOnly = true)
+    public List<AlertView> exportRows(AlertFilterRequest request) {
+        if (!CommonConstant.ROLE_PLATFORM_ADMIN.equals(UserContext.get().role())) {
+            throw new BusinessException(403, "仅管理员可以导出告警报表");
+        }
+        // 多读一行判断是否超限，用同一条查询避免总数和下载内容出现并发差异。
+        var rows = mapper.list(filter(request, null), 0, MAX_EXPORT_ROWS + 1);
+        if (rows.size() > MAX_EXPORT_ROWS) {
+            throw new BusinessException(422, "报表超过 " + MAX_EXPORT_ROWS + " 条，请缩小筛选范围");
+        }
+        return rows;
+    }
+
+    private AlertQueryFilter filter(AlertFilterRequest request, Long owner) {
+        LocalDateTime start = parseTime(request.getStartTime());
+        LocalDateTime end = parseTime(request.getEndTime());
+        if (start != null && end != null && !start.isBefore(end)) {
+            throw new BusinessException(400, "startTime 必须早于 endTime");
+        }
+        return new AlertQueryFilter(request.getFleetId(), request.getVehicleId(),
+                request.getDriverId(), owner, request.getBehaviorCode(), request.getRecordType(), request.getStatus(), start, end);
     }
 
     public AlertView detail(long id) {
@@ -55,15 +81,54 @@ public class AlertQueryService {
     }
 
     public Path keyFrame(long id) {
-        AlertView row = detail(id);
-        if (row.getKeyFramePath() == null || row.getKeyFramePath().isBlank()) {
+        return resolveKeyFrame(detail(id).getKeyFramePath());
+    }
+
+    @Transactional(readOnly = true)
+    public List<AlertTimelineItem> timeline(long id) {
+        AlertView alert = detail(id);
+        var items = new ArrayList<AlertTimelineItem>();
+        for (var frame : timelineMapper.list(id)) {
+            if (isAvailable(frame.keyFramePath())) {
+                items.add(new AlertTimelineItem(frame.frameOffset(), frame.capturedAt(),
+                        "/api/alerts/" + id + "/key-frames/" + frame.frameOffset()));
+            }
+        }
+        // 旧告警如果已有触发帧，也能直接出现在时间线上。
+        if (isAvailable(alert.getKeyFramePath())) {
+            items.add(new AlertTimelineItem(0, alert.getCapturedAt(), alert.getKeyFrameUrl()));
+        }
+        items.sort(Comparator.comparingInt(AlertTimelineItem::offset));
+        return items;
+    }
+
+    private boolean isAvailable(String relativePath) {
+        try { resolveKeyFrame(relativePath); return true; }
+        catch (BusinessException e) {
+            if (e.getCode() != 404) { throw e; }
+            return false;
+        }
+    }
+
+    public Path timelineFrame(long id, int offset) {
+        AlertView alert = detail(id);
+        if (offset == 0) { return resolveKeyFrame(alert.getKeyFramePath()); }
+        if (offset != -1 && offset != 1) { throw new BusinessException(400, "关键帧位置只支持 -1、0、1"); }
+        for (var frame : timelineMapper.list(id)) {
+            if (frame.frameOffset() == offset) { return resolveKeyFrame(frame.keyFramePath()); }
+        }
+        throw new BusinessException(404, "关键帧不存在");
+    }
+
+    private Path resolveKeyFrame(String relativePath) {
+        if (relativePath == null || relativePath.isBlank()) {
             throw new BusinessException(404, "关键帧不存在");
         }
         try {
-            Path candidate = uploadRoot.resolve(row.getKeyFramePath()).normalize();
-            if (!candidate.startsWith(uploadRoot)) { throw new BusinessException(404, "关键帧不存在"); }
+            Path candidate = uploadRoot.resolve(relativePath).normalize();
+            if (!candidate.startsWith(uploadRoot.resolve("alerts"))) { throw new BusinessException(404, "关键帧不存在"); }
             Path actual = candidate.toRealPath();
-            if (!actual.startsWith(uploadRoot.toRealPath()) || !Files.isRegularFile(actual)
+            if (!actual.startsWith(uploadRoot.toRealPath().resolve("alerts")) || !Files.isRegularFile(actual)
                     || !Files.isReadable(actual)) {
                 throw new BusinessException(404, "关键帧不存在");
             }

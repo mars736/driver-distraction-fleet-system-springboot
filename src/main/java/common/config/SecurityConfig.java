@@ -75,15 +75,21 @@ public class SecurityConfig {
                 .requestMatchers("/api/cameras", "/api/cameras/**").hasRole("PLATFORM_ADMIN")//摄像头配置的读写接口都属于管理员功能。
                 .requestMatchers("/upload/alerts", "/upload/alerts/**", "/upload/appeals", "/upload/appeals/**").denyAll()
                 // 角色决定能执行哪类操作；具体记录是否属于该司机，还要由 Service 再检查。
+                .requestMatchers("/api/scores/ranking").hasRole("PLATFORM_ADMIN")
+                .requestMatchers("/api/scores", "/api/scores/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
                 .requestMatchers(HttpMethod.POST, "/api/appeals/*/decision").hasRole("PLATFORM_ADMIN")
                 .requestMatchers(HttpMethod.POST, "/api/appeals", "/api/appeals/*/supplements", "/api/appeals/*/withdraw", "/api/appeals/*/materials").hasRole("DRIVER")
                 .requestMatchers(HttpMethod.GET, "/api/appeals", "/api/appeals/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
                 .requestMatchers(HttpMethod.HEAD, "/api/appeals", "/api/appeals/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
                 .requestMatchers("/api/appeals", "/api/appeals/**").denyAll()
                 .requestMatchers(HttpMethod.POST, "/api/alerts/*/reviews").hasRole("PLATFORM_ADMIN")
+                .requestMatchers(HttpMethod.GET, "/api/alerts/export").hasRole("PLATFORM_ADMIN")
+                .requestMatchers(HttpMethod.HEAD, "/api/alerts/export").hasRole("PLATFORM_ADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/alerts", "/api/alerts/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
                 .requestMatchers(HttpMethod.HEAD, "/api/alerts", "/api/alerts/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
                 .requestMatchers("/api/alerts", "/api/alerts/**").denyAll()
+                .requestMatchers(HttpMethod.POST, "/api/vehicle-telemetry").hasRole("DRIVER")
+                .requestMatchers("/api/vehicle-telemetry", "/api/vehicle-telemetry/**").denyAll()
                 .anyRequest().authenticated()//：其他请求都需要认证
             )
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);//把我们的 jwtAuthFilter 插到 UsernamePasswordAuthenticationFilter 前面。后面的这个过滤器没有真的启动，只是为了方便各过滤器排队

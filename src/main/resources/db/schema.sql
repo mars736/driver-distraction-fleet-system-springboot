@@ -86,7 +86,8 @@ CREATE TABLE IF NOT EXISTS recognition_record (
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_recognition_source (source_key),
     KEY idx_recognition_vehicle_time (vehicle_id, captured_at),
-    KEY idx_recognition_driver_time (driver_id, captured_at)
+    KEY idx_recognition_driver_time (driver_id, captured_at),
+    KEY idx_recognition_dashboard_time (captured_at)
 ) COMMENT '识别记录';
 
 CREATE TABLE IF NOT EXISTS alert_record (
@@ -109,7 +110,8 @@ CREATE TABLE IF NOT EXISTS alert_record (
     UNIQUE KEY uk_alert_recognition_type (recognition_id, record_type),
     KEY idx_alert_vehicle_time (vehicle_id, captured_at),
     KEY idx_alert_driver_time (driver_id, captured_at),
-    KEY idx_alert_sms (sms_status)
+    KEY idx_alert_sms (sms_status),
+    KEY idx_alert_dashboard_time (captured_at)
 ) COMMENT '告警与速度未知异常';
 
 CREATE TABLE IF NOT EXISTS alert_vehicle_state (
@@ -180,3 +182,12 @@ CREATE TABLE IF NOT EXISTS alert_appeal_material (
     uploaded_at DATETIME(3) NOT NULL,
     KEY idx_appeal_material (appeal_id,id)
 ) COMMENT '申诉材料，通过鉴权接口读取';
+
+CREATE TABLE IF NOT EXISTS alert_timeline_frame (
+    alert_id BIGINT NOT NULL,
+    frame_offset TINYINT NOT NULL COMMENT '-1 前一帧，1 后一帧',
+    captured_at DATETIME(3) NOT NULL,
+    key_frame_path VARCHAR(500) NOT NULL,
+    PRIMARY KEY (alert_id, frame_offset),
+    CONSTRAINT fk_alert_timeline_alert FOREIGN KEY (alert_id) REFERENCES alert_record(id) ON DELETE CASCADE
+) COMMENT '告警关键帧时间线';

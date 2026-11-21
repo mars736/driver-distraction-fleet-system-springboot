@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.DriverScoreMapper">
+    <select id="driverExists" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM sys_user WHERE id=#{driverId} AND role='DRIVER')
+    </select>
+    <sql id="weight">CASE a.record_type WHEN 'SMS_ALERT' THEN #{period.smsDeduction} ELSE #{period.backlogDeduction} END</sql>
+    <sql id="effectiveWeight">CASE WHEN a.status IN ('OPEN','CONFIRMED') THEN <include refid="weight"/> ELSE 0 END</sql>
+    <sql id="monthAlerts">
+        a.captured_at &gt;= #{period.start} AND a.captured_at &lt; #{period.end}
+        AND a.record_type IN ('SMS_ALERT','BACKLOG')
+    </sql>
+    <!-- 从告警原始归属统计，不按车辆现在绑定的司机倒推，调车不会转移历史扣分。
+         不联结申诉事件或处理历史，避免一对多联结把同一告警重复扣分。
+         告警申诉撤销已经同事务写回 status；普通识别帧从来不是扣分来源。 -->
+    <sql id="summaryColumns">
+        u.id AS driver_id,u.name,u.employee_no,u.fleet_id,u.enabled,
+        GREATEST(0,#{period.initial}-COALESCE(SUM(<include refid="effectiveWeight"/>),0)) AS score,
+        COALESCE(SUM(<include refid="effectiveWeight"/>),0) AS deducted_points,
+        COALESCE(SUM(CASE WHEN a.status IN ('OPEN','CONFIRMED') AND a.record_type='SMS_ALERT' THEN 1 ELSE 0 END),0) AS sms_alert_count,
+        COALESCE(SUM(CASE WHEN a.status IN ('OPEN','CONFIRMED') AND a.record_type='BACKLOG' THEN 1 ELSE 0 END),0) AS backlog_count,
+        COALESCE(SUM(CASE WHEN a.status='REVOKED' THEN 1 ELSE 0 END),0) AS revoked_count
+    </sql>
+    <sql id="driverGroup">u.id,u.name,u.employee_no,u.fleet_id,u.enabled</sql>
+    <select id="summary" resultType="vo.score.DriverScoreView">
+        SELECT <include refid="summaryColumns"/>
+        FROM sys_user u LEFT JOIN alert_record a ON a.driver_id=u.id AND <include refid="monthAlerts"/>
+        WHERE u.id=#{driverId} AND u.role='DRIVER'
+        GROUP BY <include refid="driverGroup"/>
+    </select>
+    <sql id="recordFilters">
+        WHERE a.driver_id=#{driverId} AND <include refid="monthAlerts"/>
+    </sql>
+    <select id="countRecords" resultType="long">SELECT COUNT(*) FROM alert_record a <include refid="recordFilters"/></select>
+    <select id="records" resultType="vo.score.ScoreRecordView">
+        SELECT a.id AS alert_id,a.recognition_id,a.vehicle_id,a.fleet_id,a.captured_at,
+               a.record_type,a.behavior_code,a.status,
+               <include refid="weight"/> AS original_deduction,<include refid="effectiveWeight"/> AS effective_deduction
+        FROM alert_record a <include refid="recordFilters"/>
+        ORDER BY a.captured_at DESC,a.id DESC LIMIT #{limit} OFFSET #{offset}
+    </select>
+    <select id="countDrivers" resultType="long">
+        SELECT COUNT(*) FROM sys_user WHERE role='DRIVER' <if test="fleetId != null">AND fleet_id=#{fleetId}</if>
+    </select>
+    <select id="ranking" resultType="vo.score.DriverScoreView">
+        <!-- 先对全部候选司机排名，再分页。同分并列，ID 只用于稳定分页，不打破并列名次。 -->
+        SELECT scores.*,DENSE_RANK() OVER (ORDER BY score DESC) AS ranking FROM (
+            SELECT <include refid="summaryColumns"/>
+            FROM sys_user u LEFT JOIN alert_record a ON a.driver_id=u.id AND <include refid="monthAlerts"/>
+            WHERE u.role='DRIVER' <if test="fleetId != null">AND u.fleet_id=#{fleetId}</if>
+            GROUP BY <include refid="driverGroup"/>
+        ) scores ORDER BY score DESC,driver_id ASC LIMIT #{limit} OFFSET #{offset}
+    </select>
+</mapper>
