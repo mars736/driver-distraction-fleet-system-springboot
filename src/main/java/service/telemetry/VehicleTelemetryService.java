@@ -14,7 +14,7 @@ import java.time.Duration;
 @Service
 @RequiredArgsConstructor
 public class VehicleTelemetryService implements VehicleSpeedProvider {
-    private static final long MAX_SPEED_AGE_MS = Duration.ofSeconds(15).toMillis();
+    static final long MAX_SPEED_AGE_MS = Duration.ofSeconds(15).toMillis();
     private static final long MAX_REPORT_DELAY_MS = Duration.ofMinutes(5).toMillis();
     private static final long MAX_CLOCK_LEAD_MS = Duration.ofSeconds(5).toMillis();
 
