@@ -12,7 +12,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    USE driver_fleet;
    ```
 
-   再执行 `src/main/resources/db/schema.sql`，创建十二张业务表。已有数据库可重复执行该脚本增加缺失表。如果从已包含申诉的版本升级，可以单独执行 `src/main/resources/db/migrations/20261119_vehicle_telemetry.sql`。建表脚本不会自动执行。
+   再执行 `src/main/resources/db/schema.sql`，创建十二张业务表。已有数据库可重复执行该脚本增加缺失表。已经部署申诉模块的库，启动本版本前执行 `src/main/resources/db/migrations/20261120_alert_key_frame_timeline.sql` 即可。建表脚本不会自动执行。
 3. 在 `src/main/resources/application.yml` 中配置 `spring.datasource` 的地址、用户名和密码。启动前必须完成建库、建表，因为应用初始化时会查询摄像头表。
 4. 在项目根目录执行：
 
@@ -45,6 +45,8 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 司机可通过 `/api/appeals` 对本人告警或普通分心记录提交申诉、补充文字和材料、撤回待复核申诉；管理员可复核确认或撤销。申诉历史与材料均按归属鉴权，待复核时禁止原处理入口覆盖告警。接口和状态流转见 [申诉说明](docs/alert-appeal.md)。评分查询及告警撤销后的原月份重算已接入，见 [司机评分说明](docs/driver-score.md)。
 
 未登录、无效或过期 token 返回 HTTP 401；已登录但权限不足返回 HTTP 403。两者均使用 `{ "code": ..., "message": "...", "data": null }` 格式。
+
+告警时间线提供 `GET /api/alerts/{id}/key-frames`，按顺序返回可用的前一帧、触发帧和后一帧。权限及前端接入方式见 [告警关键帧时间线](docs/alert-key-frame-timeline.md)。
 
 ## 验证
 

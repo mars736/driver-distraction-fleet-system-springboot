@@ -15,9 +15,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import service.alert.AlertQueryService;
 import vo.alert.AlertView;
+import vo.alert.AlertTimelineItem;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/alerts")
@@ -35,10 +38,24 @@ public class AlertQueryController {
 
     @GetMapping("/{id}/key-frame")
     public ResponseEntity<Resource> keyFrame(@PathVariable long id, HttpServletRequest request) throws IOException {
-        var path = service.keyFrame(id);
+        return image(service.keyFrame(id), "alert-" + id + ".jpg", request);
+    }
+
+    @GetMapping("/{id}/key-frames")
+    public Result<List<AlertTimelineItem>> timeline(@PathVariable long id) {
+        return Result.success(service.timeline(id));
+    }
+
+    @GetMapping("/{id}/key-frames/{offset}")
+    public ResponseEntity<Resource> timelineFrame(@PathVariable long id, @PathVariable int offset,
+            HttpServletRequest request) throws IOException {
+        return image(service.timelineFrame(id, offset), "alert-" + id + "-" + offset + ".jpg", request);
+    }
+
+    private ResponseEntity<Resource> image(Path path, String filename, HttpServletRequest request) throws IOException {
         return ResponseEntity.ok().contentType(MediaType.IMAGE_JPEG)
                 .contentLength(Files.size(path)).cacheControl(CacheControl.noStore())
-                .header("Content-Disposition", ContentDisposition.inline().filename("alert-" + id + ".jpg").build().toString())
+                .header("Content-Disposition", ContentDisposition.inline().filename(filename).build().toString())
                 .body("HEAD".equals(request.getMethod()) ? null : new FileSystemResource(path));
     }
 
