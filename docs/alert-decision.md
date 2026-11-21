@@ -30,9 +30,9 @@
 
 队列满时拒绝新帧，输出 ERROR 并累计 `rejectedFrames`；处理异常限次重试，耗尽且判定未提交时累计 `failedFrames`，已提交后的短信派发失败则单独累计 `deliveryFailures`，均输出 ERROR。短信失败不重置已提交的片段状态。这些结果不会伪装为正常识别。队列不是持久化消息队列，异常退出或关闭期限耗尽时，尚未处理的帧可能丢失；已提交的计数和记录保留。
 
-## 速度和短信占位
+## 速度上报与短信模拟
 
-默认 `VehicleSpeedProvider` 返回未知，未伪造行驶速度。本阶段没有司机 App/GPS 上报接口或速度超时检测；后续实现此接口时必须按采集时间取速度，并处理上报过期。
+车辆速度来自[司机 App 定位上报](vehicle-telemetry.md)。判定按采集时间读取车辆和司机匹配的最近样本，超过 15 秒或样本缺少有效车速时视为未知。
 
 默认 `SmsSender` 只输出模拟日志，结果为 `SIMULATED`，不会调用外部短信通道。没有有效司机、手机号或司机已停用时标记 `SKIPPED_NO_RECIPIENT`；明确绑定了另一辆车时标记 `SKIPPED_RECIPIENT_MISMATCH`；发送器异常标记 `FAILED`。只有真实发送器明确返回成功时才允许 `SENT`。
 
@@ -53,7 +53,7 @@ alert:
   shutdown-wait-ms: 5000
 ```
 
-关键帧保存在 `file.upload-dir` 下的 `alerts/yyyy/MM/dd/`。只保存触发时当前帧，没有实现告警前后帧缓存、时间线查询、评分或 WebSocket 推送。告警列表、详情和鉴权图片读取见 [告警查询说明](alert-query.md)，司机申诉见 [申诉说明](alert-appeal.md)。
+关键帧保存在 `file.upload-dir` 下的 `alerts/yyyy/MM/dd/`。触发帧和可用的前后帧见 [告警时间线](alert-key-frame-timeline.md)。告警列表、详情和鉴权图片读取见 [告警查询说明](alert-query.md)，司机申诉见 [申诉说明](alert-appeal.md)。
 
 ## 验证
 
