@@ -21,6 +21,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -88,6 +89,7 @@ class AlertPersistenceIntegrationTest {
     @Autowired AlertRuleEngine engine;
     @Autowired ObjectMapper json;
     @Autowired KeyFrameStore keyFrames;
+    @Autowired ApplicationEventPublisher events;
     @Autowired MutableSpeed speed;
     @Autowired PlatformTransactionManager transactions;
     @Autowired InferFrameQueue queue;

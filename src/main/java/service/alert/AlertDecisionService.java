@@ -7,11 +7,13 @@ import entity.Vehicle;
 import lombok.RequiredArgsConstructor;
 import mapper.AlertDecisionMapper;
 import mapper.VehicleMapper;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import service.alert.rule.AlertKind;
 import service.alert.rule.AlertRuleEngine;
 import service.alert.rule.VehicleAlertState;
+import service.alert.live.AlertCreatedEvent;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -72,6 +74,7 @@ public class AlertDecisionService {
                     : kind == AlertKind.BACKLOG ? evaluation.state().getOtherEvents() : 0);
             alert.setSmsStatus(kind == AlertKind.SMS_ALERT ? "PENDING" : "NOT_REQUIRED");
             mapper.insertAlert(alert);
+            events.publishEvent(AlertCreatedEvent.from(alert));
             if (violation) { timelineAlerts.add(alert.getId()); }
         }
         if (!"OUT_OF_ORDER".equals(evaluation.reason())) {

@@ -20,6 +20,7 @@ import java.io.IOException;
 /** 告警、评分和车辆定位上报接口使用真实 HTTP 状态码。 */
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(assignableTypes = {AlertQueryController.class, AlertReviewController.class,
+        AppealController.class, AlertLiveController.class})
         AppealController.class, AlertReportController.class})
         AppealController.class, DriverScoreController.class, VehicleTelemetryController.class})
 @Slf4j
