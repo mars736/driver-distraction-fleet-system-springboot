@@ -3,6 +3,7 @@ package controller.alert;
 import common.exception.BusinessException;
 import controller.score.DriverScoreController;
 import controller.telemetry.VehicleTelemetryController;
+import controller.telemetry.VehicleLiveStatusController;
 import common.response.Result;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
@@ -20,7 +21,8 @@ import java.io.IOException;
 /** 告警、评分和车辆定位上报接口使用真实 HTTP 状态码。 */
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(assignableTypes = {AlertQueryController.class, AlertReviewController.class,
-        AppealController.class, DriverScoreController.class, VehicleTelemetryController.class})
+        AppealController.class, DriverScoreController.class, VehicleTelemetryController.class,
+        VehicleLiveStatusController.class, AlertLiveController.class})
 @Slf4j
 public class AlertApiExceptionHandler {
     @ExceptionHandler(BusinessException.class)
