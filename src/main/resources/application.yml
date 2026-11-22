@@ -21,6 +21,17 @@ infer:
 video:
   ffmpeg-path: ffmpeg
 
+sms:
+  mode: ${FLEET_SMS_MODE:simulated}
+  aliyun:
+    access-key-id: ${FLEET_SMS_ACCESS_KEY_ID:}
+    access-key-secret: ${FLEET_SMS_ACCESS_KEY_SECRET:}
+    sign-name: ${FLEET_SMS_SIGN_NAME:}
+    template-code: ${FLEET_SMS_TEMPLATE_CODE:}
+    out-id-prefix: ${FLEET_SMS_OUT_ID_PREFIX:}
+    behavior-parameter: ${FLEET_SMS_BEHAVIOR_PARAMETER:}
+    alert-id-parameter: ${FLEET_SMS_ALERT_ID_PARAMETER:}
+
 # JWT 密钥与有效期（HS256 要求密钥 >= 32 字节；演示用，上线前替换）
 jwt:
   secret: driver-distraction-fleet-system-default-secret-key-1234567890

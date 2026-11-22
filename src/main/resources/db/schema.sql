@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS alert_record (
     max_p DOUBLE NULL,
     record_type VARCHAR(32) NOT NULL COMMENT 'SMS_ALERT / BACKLOG / SPEED_UNKNOWN；速度异常不作为司机违规',
     event_count INT NOT NULL DEFAULT 0,
-    sms_status VARCHAR(40) NOT NULL COMMENT 'NOT_REQUIRED / PENDING / SENDING / SIMULATED / SENT / FAILED / SKIPPED_*',
+    sms_status VARCHAR(40) NOT NULL COMMENT 'NOT_REQUIRED、处理中、模拟结果、真实发送及回执状态',
     status VARCHAR(16) NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN / CONFIRMED / REVOKED',
     key_frame_path VARCHAR(255) NULL,
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -209,3 +209,32 @@ CREATE TABLE IF NOT EXISTS vehicle_offline_notice (
     detected_at BIGINT NOT NULL,
     PRIMARY KEY (vehicle_id, driver_id, last_sampled_at)
 ) COMMENT '车辆定位离线通知去重记录';
+
+CREATE TABLE IF NOT EXISTS operation_log (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    actor_id BIGINT NULL,
+    fleet_id BIGINT NULL,
+    action VARCHAR(40) NOT NULL,
+    target_type VARCHAR(24) NOT NULL,
+    target_id BIGINT NULL,
+    outcome VARCHAR(12) NOT NULL,
+    detail_code VARCHAR(40) NULL,
+    request_id CHAR(36) NOT NULL,
+    operated_at DATETIME(3) NOT NULL,
+    KEY idx_operation_time (operated_at, id),
+    KEY idx_operation_fleet_time (fleet_id, operated_at, id),
+    KEY idx_operation_actor_time (actor_id, operated_at, id)
+) COMMENT '业务操作审计';
+
+CREATE TABLE IF NOT EXISTS sms_delivery (
+    alert_id BIGINT NOT NULL PRIMARY KEY,
+    out_id VARCHAR(64) NOT NULL,
+    recipient VARCHAR(16) NULL,
+    attempted_at DATETIME(3) NULL,
+    next_check_at DATETIME(3) NULL,
+    provider_message_id VARCHAR(128) NULL,
+    provider_code VARCHAR(80) NULL,
+    UNIQUE KEY uk_sms_delivery_out_id (out_id),
+    KEY idx_sms_delivery_next_check (next_check_at, alert_id),
+    CONSTRAINT fk_sms_delivery_alert FOREIGN KEY (alert_id) REFERENCES alert_record(id) ON DELETE CASCADE
+) COMMENT '真实短信派发与回执';

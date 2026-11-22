@@ -10,10 +10,13 @@ import entity.Fleet;
 import entity.User;
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
+import service.audit.OperationAction;
+import service.audit.OperationLogService;
 import mapper.FleetMapper;
 import mapper.UserMapper;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import vo.auth.FleetOptionVO;
 import vo.auth.LoginResponse;
 import vo.auth.UserProfileVO;
@@ -43,6 +46,7 @@ public class AuthService {
     boolean matches(CharSequence rawPassword, String encodedPassword);
 }*/
     private final JwtUtil jwtUtil;
+    private final OperationLogService audit;
 
     /** 注册页下拉：返回平台已启用的车队 */
     public List<FleetOptionVO> listEnabledFleets() {
@@ -50,6 +54,7 @@ public class AuthService {
     }
 
     /** 司机注册：工号全局唯一，注册成功默认可用 */
+    @Transactional
     public void register(RegisterRequest req) {
         Fleet fleet = fleetMapper.selectById(req.getFleetId());
         if (fleet == null || !Boolean.TRUE.equals(fleet.getEnabled())) {
@@ -70,21 +75,26 @@ public class AuthService {
         user.setEnabled(true);
         user.setTokenVersion(0);
         userMapper.insert(user);
+        audit.authSuccess(OperationAction.AUTH_REGISTER, user);
     }
 
     /** 登录：账号不存在 / 密码错误分别提示 */
     public LoginResponse login(LoginRequest req) {
         User user = userMapper.selectByUsername(req.getAccount());
         if (user == null) {
+            audit.loginFailure(null, OperationLogService.LoginFailure.ACCOUNT_NOT_FOUND);
             throw new BusinessException(400, "账号不存在");
         }
         if (!Boolean.TRUE.equals(user.getEnabled())) {
+            audit.loginFailure(user, OperationLogService.LoginFailure.ACCOUNT_DISABLED);
             throw new BusinessException(403, "账号已被禁用");
         }
         if (!passwordEncoder.matches(req.getPassword(), user.getPassword())) {// matches返回 boolean 值，判断密码是否匹配
+            audit.loginFailure(user, OperationLogService.LoginFailure.BAD_PASSWORD);
             throw new BusinessException(400, "密码错误");
         }
         String token = jwtUtil.generateToken(user.getId(), user.getTokenVersion());
+        audit.authSuccess(OperationAction.AUTH_LOGIN, user);
         return new LoginResponse(token, user.getId(), user.getName(), user.getRole(), user.getFleetId());
     }
 
@@ -110,6 +120,7 @@ public class AuthService {
     }
 
     /** 修改密码：改完把 tokenVersion +1，旧 token 立即失效 */
+    @Transactional
     public void changePassword(Long userId, ChangePasswordRequest req) {//userId是controller从上下文获取的
         User user = userMapper.selectById(userId);
         if (user == null) {
@@ -123,6 +134,7 @@ public class AuthService {
                 passwordEncoder.encode(req.getNewPassword()),// encode返回 BCrypt 算法处理后的密文
                 user.getTokenVersion() + 1
         );
+        audit.success(OperationAction.AUTH_PASSWORD, userId, user.getFleetId());
     }
 
     /** 个人中心：姓名、所属车队、工号、绑定车辆 */
@@ -149,11 +161,13 @@ public class AuthService {
     }
 
     /** 管理员禁用 / 启用账号：状态切换时 tokenVersion +1，让旧 token 立即失效 */
+    @Transactional
     public void setEnabled(Long id, boolean enabled) {
         User user = userMapper.selectById(id);
         if (user == null) {
             throw new BusinessException(404, "用户不存在");
         }
         userMapper.updateEnabled(id, enabled, user.getTokenVersion() + 1);
+        audit.success(OperationAction.AUTH_ENABLED, id, user.getFleetId(), enabled ? "ENABLED" : "DISABLED");
     }
 }

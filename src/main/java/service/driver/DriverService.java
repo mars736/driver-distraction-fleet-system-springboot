@@ -6,6 +6,8 @@ import common.response.PageResult;
 import entity.User;
 import entity.Vehicle;
 import lombok.RequiredArgsConstructor;
+import service.audit.OperationAction;
+import service.audit.OperationLogService;
 import lombok.extern.slf4j.Slf4j;
 import mapper.FleetMapper;
 import mapper.UserMapper;
@@ -28,6 +30,7 @@ public class DriverService {
     private final FleetMapper fleetMapper;
     private final VehicleMapper vehicleMapper;
     private final PasswordEncoder passwordEncoder;
+    private final OperationLogService audit;
 
     public PageResult<User> list(Long fleetId, String keyword, Integer page, Integer pageSize) {
         int currentPage = (page == null || page < 1) ? 1 : page;
@@ -65,6 +68,7 @@ public class DriverService {
         user.setEnabled(true);
         user.setTokenVersion(0);
         userMapper.insert(user);
+        audit.success(OperationAction.DRIVER_CREATE, user.getId(), user.getFleetId());
         log.info("新增司机 id={}, fleetId={}, employeeNo={}",
                 user.getId(), user.getFleetId(), user.getEmployeeNo());
         return user;
@@ -91,6 +95,7 @@ public class DriverService {
         if (passwordChanged) {
             userMapper.updatePassword(user.getId(), user.getPassword(), existing.getTokenVersion() + 1);
         }
+        audit.success(OperationAction.DRIVER_UPDATE, user.getId(), user.getFleetId());
         return user;
     }
 
@@ -98,6 +103,7 @@ public class DriverService {
     public void updateStatus(Long id, boolean enabled) {
         User user = getById(id);
         userMapper.updateEnabled(id, enabled, user.getTokenVersion() + 1);
+        audit.success(OperationAction.DRIVER_STATUS, id, user.getFleetId(), enabled ? "ENABLED" : "DISABLED");
     }
 
     @Transactional
@@ -105,12 +111,14 @@ public class DriverService {
         User user = getById(id);
         checkVehicleBelongsToFleet(vehicleId, user.getFleetId());
         userMapper.updateVehicleId(id, vehicleId);
+        audit.success(OperationAction.DRIVER_BIND_VEHICLE, id, user.getFleetId(), vehicleId == null ? "UNBOUND" : "BOUND");
     }
 
     @Transactional
     public void delete(Long id) {
-        getById(id);
+        User user = getById(id);
         userMapper.deleteById(id);
+        audit.success(OperationAction.DRIVER_DELETE, id, user.getFleetId());
         log.info("删除司机 id={}", id);
     }
 

@@ -6,6 +6,7 @@ import entity.RecognitionRecord;
 import entity.Vehicle;
 import lombok.RequiredArgsConstructor;
 import mapper.AlertDecisionMapper;
+import mapper.SmsDeliveryMapper;
 import mapper.VehicleMapper;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -14,12 +15,14 @@ import service.alert.rule.AlertKind;
 import service.alert.rule.AlertRuleEngine;
 import service.alert.rule.VehicleAlertState;
 import service.alert.live.AlertCreatedEvent;
+import service.alert.sms.SmsChannelProperties;
 
 import java.io.IOException;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -32,6 +35,8 @@ public class AlertDecisionService {
     private final KeyFrameStore keyFrameStore;
     private final AlertTimelineCapture timelineCapture;
     private final ApplicationEventPublisher events;
+    private final SmsDeliveryMapper smsDeliveries;
+    private final SmsChannelProperties smsProperties;
 
     /** 锁定车辆状态，识别记录、告警和计数一起提交；重试不会重复累计。 */
     @Transactional(rollbackFor = Exception.class)
@@ -46,12 +51,14 @@ public class AlertDecisionService {
         RecognitionRecord existing = mapper.findRecognition(input.sourceKey());
         if (existing != null) { return mapper.pendingSms(existing.getId()); }
 
+        boolean streamChanged = input.streamId() != null && !Objects.equals(input.streamId(), state.getStreamId());
+        boolean broken = continuityBroken || streamChanged;
         Double speed = vehicle == null ? null : speedProvider.speedKmh(vehicle.getId(), input.driverId(), input.capturedAt());
         boolean validNumbers = Double.isFinite(input.maxP()) && input.maxP() >= 0 && input.maxP() <= 1
                 && Double.isFinite(input.energy()) && Double.isFinite(input.knnDist()) && input.knnDist() >= 0;
         AlertRuleEngine.Evaluation evaluation = engine.evaluate(state, new AlertRuleEngine.Observation(
                 vehicle == null ? null : vehicle.getId(), input.driverId(), input.capturedAt(),
-                validNumbers ? input.pred() : -1, input.ood(), speed, continuityBroken));
+                validNumbers ? input.pred() : -1, input.ood(), speed, broken));
 
         String keyFrame = evaluation.hasViolation() ? keyFrameStore.save(input) : null;
         keyFrameStore.deleteOnRollback(keyFrame);
@@ -75,11 +82,15 @@ public class AlertDecisionService {
                     : kind == AlertKind.BACKLOG ? evaluation.state().getOtherEvents() : 0);
             alert.setSmsStatus(kind == AlertKind.SMS_ALERT ? "PENDING" : "NOT_REQUIRED");
             mapper.insertAlert(alert);
+            if (kind == AlertKind.SMS_ALERT && smsProperties.getMode() == SmsChannelProperties.Mode.ALIYUN) {
+                smsDeliveries.enqueue(alert.getId(), smsProperties.getAliyun().getOutIdPrefix() + "-" + alert.getId());
+            }
             events.publishEvent(AlertCreatedEvent.from(alert));
             if (violation) { timelineAlerts.add(alert.getId()); }
         }
         if (!"OUT_OF_ORDER".equals(evaluation.reason())) {
-            timelineCapture.capture(input, recognition.getCapturedAt(), timelineAlerts, continuityBroken);
+            evaluation.state().setStreamId(input.streamId());
+            timelineCapture.capture(input, recognition.getCapturedAt(), timelineAlerts, broken);
         }
         if (vehicle != null) {
             mapper.updateState(vehicle.getId(), objectMapper.writeValueAsString(evaluation.state()));

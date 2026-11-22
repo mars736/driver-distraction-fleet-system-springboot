@@ -12,11 +12,14 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    USE driver_fleet;
    ```
 
-   新库执行 `src/main/resources/db/schema.sql`，创建十三张业务表。已有申诉模块的数据库按顺序执行以下迁移，补齐定位表、关键帧时间线表和工作台索引。更旧的数据库先执行告警复核及申诉迁移。应用启动时不会自动执行这些脚本。
+   新库执行 `src/main/resources/db/schema.sql`，创建十六张业务表。已有申诉模块的数据库按顺序执行以下迁移。更旧的数据库先执行告警复核及申诉迁移。应用启动时不会自动执行这些脚本。
 
    - `src/main/resources/db/migrations/20261119_vehicle_telemetry.sql`
    - `src/main/resources/db/migrations/20261120_alert_key_frame_timeline.sql`
    - `src/main/resources/db/migrations/20261120_dashboard_indexes.sql`
+   - `src/main/resources/db/migrations/20261121_vehicle_offline_notice.sql`
+   - `src/main/resources/db/migrations/20261122_operation_log.sql`
+   - `src/main/resources/db/migrations/20261122_sms_delivery.sql`
 3. 在 `src/main/resources/application.yml` 中配置 `spring.datasource` 的地址、用户名和密码。启动前必须完成建库、建表，因为应用初始化时会查询摄像头表。
 4. 在项目根目录执行：
 
@@ -33,8 +36,8 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 - 抽帧需要安装 FFmpeg，并通过 `video.ffmpeg-path` 指定可执行文件或使用 PATH 中的 `ffmpeg`。
 - 推理服务不在本仓库。默认调用 `http://127.0.0.1:8000/predict`，可通过 `infer.fastapi-url` 修改。
 - 摄像头配置接口 `/api/cameras` 及其子路径的所有读写操作均要求 `PLATFORM_ADMIN`。
-- 视频读流结束或异常时会清理对应进程。管理员可调用 `PATCH /api/cameras/{id}/enabled?enabled=true` 重新启动该路，也可以更新摄像头配置触发重启。目前没有自动重连或定时重试。
-- 没有启用摄像头时，日志显示“0 路摄像头”属于正常情况。推理结果已接入异步告警判定，有效车速来自司机 App，短信通过模拟发送器记录。
+- 启用的摄像头在读流结束、失败或断帧超时时自动重连。配置、操作日志和短信验收见[监控与告警联调](docs/monitoring-delivery.md)。
+- 没有启用摄像头时，日志显示“0 路摄像头”属于正常情况。推理结果已接入异步告警判定，有效车速来自司机 App，短信默认走模拟通道，可配置阿里云真实通道。
 
 司机用 `POST /api/vehicle-telemetry` 上报绑定车辆的定位和速度。后端在识别帧的采集时间查找该司机的近期样本，详情见 [定位上报与联调](docs/vehicle-telemetry.md)。
 
@@ -61,7 +64,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 # 权限和进程生命周期回归测试，不需要 MySQL、FFmpeg 或推理服务
 .\mvnw.cmd "-Dtest=CameraSecurityTest,FfmpegManagerTest" test
 
-# 全部常规测试：现有 contextLoads 测试需要配置可用的 MySQL 和上述十三张表
+# 全部常规测试：现有 contextLoads 测试需要配置可用的 MySQL 和上述十六张表
 .\mvnw.cmd test
 ```
 

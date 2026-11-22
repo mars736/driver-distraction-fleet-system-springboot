@@ -8,6 +8,7 @@ public class VehicleAlertState {
     private long hourStart = Long.MIN_VALUE;
     private long lastCapturedAt = Long.MIN_VALUE;
     private Long driverId;
+    private String streamId;
     private int smsFrames;
     private boolean smsAlerted;
     private boolean otherSegment;
@@ -21,6 +22,7 @@ public class VehicleAlertState {
         hourStart = source.hourStart;
         lastCapturedAt = source.lastCapturedAt;
         driverId = source.driverId;
+        streamId = source.streamId;
         smsFrames = source.smsFrames;
         smsAlerted = source.smsAlerted;
         otherSegment = source.otherSegment;

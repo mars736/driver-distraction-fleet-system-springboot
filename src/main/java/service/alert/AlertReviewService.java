@@ -6,6 +6,8 @@ import common.security.UserContext;
 import dto.alert.AlertReviewRequest;
 import entity.AlertReviewRecord;
 import lombok.RequiredArgsConstructor;
+import service.audit.OperationAction;
+import service.audit.OperationLogService;
 import mapper.AlertReviewMapper;
 import mapper.AppealMapper;
 import mapper.UserMapper;
@@ -23,6 +25,7 @@ public class AlertReviewService {
     private final UserMapper userMapper;
     private final AlertQueryService queryService;
     private final AppealMapper appealMapper;
+    private final OperationLogService audit;
 
     @Transactional
     public AlertReviewRecord review(long id, AlertReviewRequest request) {
@@ -67,6 +70,7 @@ public class AlertReviewService {
         record.setOperatorName(operator.getName());
         record.setOperatedAt(LocalDateTime.now(ZoneId.of("Asia/Shanghai")).truncatedTo(ChronoUnit.MILLIS));
         if (mapper.insertReview(record) != 1) { throw new IllegalStateException("告警处理记录保存失败"); }
+        audit.success(OperationAction.ALERT_REVIEW, id, alert.getFleetId(), request.getStatus().name());
         return record;
     }
 

@@ -3,6 +3,8 @@ package controller.alert;
 import dto.alert.AlertFilterRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import service.audit.OperationAction;
+import service.audit.OperationLogService;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -26,6 +28,7 @@ public class AlertReportController {
     private static final MediaType CSV = new MediaType("text", "csv", StandardCharsets.UTF_8);
     private static final HeaderContentNegotiationStrategy ACCEPT = new HeaderContentNegotiationStrategy();
     private final AlertQueryService service;
+    private final OperationLogService audit;
 
     // 固定路径先与详情路径 /{id} 区分，再协商内容，避免把 export 当作告警 ID。
     @GetMapping("/api/alerts/export")
@@ -36,6 +39,7 @@ public class AlertReportController {
                 .findFirst().map(mediaType -> mediaType.getQualityValue() > 0).orElse(false);
         if (!acceptsCsv) { throw new HttpMediaTypeNotAcceptableException(List.of(CSV)); }
         byte[] report = AlertReportCsv.encode(service.exportRows(request));
+        audit.success(OperationAction.ALERT_EXPORT, null, request.getFleetId(), "CSV");
         return ResponseEntity.ok().contentType(CSV).cacheControl(CacheControl.noStore())
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename("alerts.csv").build().toString())
                 .body(report);

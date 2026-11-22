@@ -21,11 +21,13 @@ import static org.mockito.Mockito.*;
 class FfmpegManagerTest {
     private final List<ControlledStream> streams = new ArrayList<>();
     private FfmpegManager manager;
+    private VideoCaptureProperties properties;
     private Camera camera;
 
     @BeforeEach
     void setUp() {
-        manager = spy(new FfmpegManager(mock(InferFrameQueue.class), new VideoCaptureProperties()));
+        properties = new VideoCaptureProperties();
+        manager = spy(new FfmpegManager(mock(InferFrameQueue.class), properties));
         camera = new Camera();
         camera.setId(7L);
         camera.setStreamUrl("test-stream");
@@ -106,6 +108,38 @@ class FfmpegManagerTest {
             verify(manager, times(2)).startProcess(camera);
             verify(newProcess, never()).destroy();
         }
+    }
+
+    @Test
+    void reconnectsAfterEndOfStreamWithoutManualRestart() throws Exception {
+        properties.setReconnectInitialDelayMs(100);
+        ControlledStream first = stream(false);
+        ControlledStream second = stream(false);
+        doReturn(process(first, new AtomicBoolean(true)), process(second, new AtomicBoolean(true)))
+                .when(manager).startProcess(camera);
+        manager.start(camera);
+        assertThat(first.reading.await(2, TimeUnit.SECONDS)).isTrue();
+        first.release.countDown();
+        assertThat(second.reading.await(3, TimeUnit.SECONDS)).isTrue();
+        verify(manager, times(2)).startProcess(camera);
+    }
+
+    @Test
+    void detectsNoFramesAndDoesNotRestartAfterStop() throws Exception {
+        properties.setNoFrameTimeoutMs(200);
+        properties.setReconnectInitialDelayMs(100);
+        camera.setSampleIntervalSeconds(0.02);
+        ControlledStream first = stream(false);
+        ControlledStream second = stream(false);
+        Process old = process(first, new AtomicBoolean(true));
+        doReturn(old, process(second, new AtomicBoolean(true))).when(manager).startProcess(camera);
+        manager.start(camera);
+        assertThat(first.reading.await(2, TimeUnit.SECONDS)).isTrue();
+        assertThat(second.reading.await(3, TimeUnit.SECONDS)).isTrue();
+        manager.stop(camera.getId());
+        await().during(400, TimeUnit.MILLISECONDS).atMost(2, TimeUnit.SECONDS)
+                .untilAsserted(() -> verify(manager, times(2)).startProcess(camera));
+        verify(old).destroy();
     }
 
     private ControlledStream stream(boolean fail) {

@@ -4,6 +4,8 @@ import common.exception.BusinessException;
 import common.response.PageResult;
 import entity.Fleet;
 import lombok.RequiredArgsConstructor;
+import service.audit.OperationAction;
+import service.audit.OperationLogService;
 import lombok.extern.slf4j.Slf4j;
 import mapper.FleetMapper;
 import org.springframework.stereotype.Service;
@@ -20,6 +22,7 @@ import java.util.List;
 public class FleetService {
 
     private final FleetMapper fleetMapper;
+    private final OperationLogService audit;
 
     public PageResult<Fleet> list(String keyword, Integer page, Integer pageSize) {
         int currentPage = (page == null || page < 1) ? 1 : page;
@@ -48,6 +51,7 @@ public class FleetService {
             fleet.setEnabled(true);
         }
         fleetMapper.insert(fleet);
+        audit.success(OperationAction.FLEET_CREATE, fleet.getId(), fleet.getId());
         log.info("新增车队 id={}, fleetNo={}", fleet.getId(), fleet.getFleetNo());
         return fleet;
     }
@@ -59,6 +63,7 @@ public class FleetService {
             throw new BusinessException("车队编号已存在");
         }
         fleetMapper.update(fleet);
+        audit.success(OperationAction.FLEET_UPDATE, fleet.getId(), fleet.getId());
         return fleet;
     }
 
@@ -66,12 +71,14 @@ public class FleetService {
     public void updateEnabled(Long id, Boolean enabled) {
         getById(id);
         fleetMapper.updateEnabled(id, enabled);
+        audit.success(OperationAction.FLEET_ENABLED, id, id, Boolean.TRUE.equals(enabled) ? "ENABLED" : "DISABLED");
     }
 
     @Transactional
     public void delete(Long id) {
         getById(id);
         fleetMapper.deleteById(id);
+        audit.success(OperationAction.FLEET_DELETE, id, id);
         log.info("删除车队 id={}", id);
     }
 }
