@@ -14,6 +14,8 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.context.ApplicationEventPublisher;
+import service.alert.live.OperationsReminderEvent;
 import org.springframework.transaction.support.TransactionTemplate;
 import service.alert.AlertDecisionService;
 import service.alert.CapturedInference;
@@ -46,6 +48,7 @@ class AlertLiveStreamIntegrationTest {
     @Autowired ObjectMapper json;
     @Autowired AlertDecisionService decision;
     @Autowired PlatformTransactionManager transactions;
+    @Autowired ApplicationEventPublisher events;
     @Autowired VehicleOfflineNotifier offlineNotifier;
     @Autowired VehicleMapper vehicles;
     private long fleet;
@@ -187,6 +190,22 @@ class AlertLiveStreamIntegrationTest {
             assertThat(nextEvent(all, "vehicle-offline").path("sampledAt").asLong()).isEqualTo(newSample);
             fire(input(driverA));
             assertThat(nextAlert(driver)).isEqualTo(newestAlert(driverA));
+        }
+    }
+
+    @Test
+    void operationsRemindersAreEmittedAfterCommitAndOnlyToAdmins() throws Exception {
+        try (var adminStream = subscribe(admin); var driverStream = subscribe(driverA)) {
+            var tx = new TransactionTemplate(transactions);
+            tx.executeWithoutResult(status -> {
+                events.publishEvent(new OperationsReminderEvent(-1, "MAINTENANCE", 10, fleet, "VEHICLE", 6, "DUE"));
+                status.setRollbackOnly();
+            });
+            tx.executeWithoutResult(status -> events.publishEvent(
+                    new OperationsReminderEvent(19, "CERTIFICATE", 10, fleet, "DRIVER", driverA, "EXPIRED")));
+            assertThat(nextEvent(adminStream, "operations-reminder").path("id").asLong()).isEqualTo(19);
+            fire(input(driverA));
+            assertThat(nextAlert(driverStream)).isEqualTo(newestAlert(driverA));
         }
     }
 

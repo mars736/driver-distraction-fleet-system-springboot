@@ -96,6 +96,11 @@ public class AlertLiveStream {
         broadcast(new LiveEvent("vehicle-offline", null, event, null));
     }
 
+    @TransactionalEventListener
+    public void committed(OperationsReminderEvent event) {
+        broadcast(new LiveEvent("operations-reminder", null, event, null));
+    }
+
     private record LiveEvent(String name, String id, Object data, Long driverId) { }
 
     private void broadcast(LiveEvent event) {
