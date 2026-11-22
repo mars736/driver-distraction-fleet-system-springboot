@@ -24,6 +24,12 @@
         ORDER BY sampled_at DESC
         LIMIT 1
     </select>
+    <select id="findTrack" resultType="vo.telemetry.VehiclePosition">
+        SELECT vehicle_id, driver_id, sampled_at, latitude, longitude, speed_kmh
+        FROM vehicle_telemetry WHERE vehicle_id = #{vehicleId}
+          AND sampled_at &gt;= #{start} AND sampled_at &lt; #{end}
+        ORDER BY sampled_at, driver_id LIMIT #{limit}
+    </select>
     <sql id="latestPositions">
         SELECT vehicle_id, driver_id, sampled_at, latitude, longitude, speed_kmh
         FROM (

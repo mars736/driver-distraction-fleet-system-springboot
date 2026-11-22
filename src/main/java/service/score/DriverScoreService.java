@@ -12,6 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Isolation;
 import vo.score.*;
 import java.time.Clock;
+import java.util.List;
+import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -54,6 +56,26 @@ public class DriverScoreService {
         var rows = mapper.ranking(request.getFleetId(), period, offset(request), request.getPageSize());
         rows.forEach(row -> decorate(row, period));
         return PageResult.of(rows, mapper.countDrivers(request.getFleetId()), request.getPage(), request.getPageSize());
+    }
+
+    @Transactional(readOnly = true)
+    public List<DriverScoreView> exportRows(ScoreQueryRequest request, Long driverId) {
+        if (!CommonConstant.ROLE_PLATFORM_ADMIN.equals(UserContext.get().role())) {
+            throw new BusinessException(403, "仅管理员可导出司机评分");
+        }
+        var period = period(request);
+        if (driverId != null) {
+            var row = mapper.summary(driverId, period);
+            if (row == null || (request.getFleetId() != null && !Objects.equals(request.getFleetId(), row.getFleetId()))) {
+                throw new BusinessException(404, "所选车队中没有该司机");
+            }
+            decorate(row, period);
+            return List.of(row);
+        }
+        var rows = mapper.ranking(request.getFleetId(), period, 0, 10_001);
+        if (rows.size() > 10_000) { throw new BusinessException(422, "司机评分超过 10000 条，请按车队筛选"); }
+        rows.forEach(row -> decorate(row, period));
+        return rows;
     }
 
     private void authorize(long driverId) {

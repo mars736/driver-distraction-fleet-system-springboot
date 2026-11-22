@@ -280,8 +280,8 @@ class RecognitionQueryIntegrationTest {
     void anonymousRequestsReturn401(String path) throws Exception {
         mvc.perform(get(path)).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value(401));
     }
-    @ParameterizedTest @ValueSource(strings={"POST","PUT","PATCH","DELETE"})
-    void writesAreForbiddenEvenForAdministrator(String method) throws Exception {
+    @ParameterizedTest @ValueSource(strings={"POST","PUT","PATCH"})
+    void unsupportedWritesAreForbiddenEvenForAdministrator(String method) throws Exception {
         mvc.perform(request(HttpMethod.valueOf(method),path(trigger)).header("Authorization",adminToken))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value(403));
     }

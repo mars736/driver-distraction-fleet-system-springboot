@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.ReportJobMapper">
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO report_job (owner_id, report_type, format, filters_json, status, created_at)
+        VALUES (#{ownerId}, #{reportType}, #{format}, #{filtersJson}, #{status}, #{createdAt})
+    </insert>
+    <select id="byOwner" resultType="entity.ReportJob">
+        SELECT * FROM report_job WHERE id = #{id} AND owner_id = #{owner}
+    </select>
+    <select id="count" resultType="long">SELECT COUNT(*) FROM report_job WHERE owner_id = #{owner}</select>
+    <select id="list" resultType="entity.ReportJob">
+        SELECT * FROM report_job WHERE owner_id = #{owner} ORDER BY id DESC LIMIT #{limit} OFFSET #{offset}
+    </select>
+    <select id="next" resultType="entity.ReportJob">
+        SELECT * FROM report_job WHERE status = 'PENDING' ORDER BY id LIMIT 1
+    </select>
+    <update id="claim">
+        UPDATE report_job SET status = 'RUNNING', run_token = #{token}, started_at = #{now}, attempts = attempts + 1
+        WHERE id = #{id} AND status = 'PENDING'
+    </update>
+    <update id="complete">
+        UPDATE report_job SET status = 'COMPLETED', finished_at = #{now}, expires_at = #{expiry}, row_count = #{rows}
+        WHERE id = #{id} AND status = 'RUNNING' AND run_token = #{token}
+    </update>
+    <update id="fail">
+        UPDATE report_job SET status = 'FAILED', finished_at = #{now}, error_message = #{message}
+        WHERE id = #{id} AND status = 'RUNNING' AND run_token = #{token}
+    </update>
+    <select id="stuck" resultType="entity.ReportJob">
+        SELECT * FROM report_job WHERE status = 'RUNNING' AND started_at &lt;= #{cutoff}
+        ORDER BY started_at, id LIMIT 20
+    </select>
+    <update id="recover">
+        UPDATE report_job
+        SET status = IF(attempts &lt; 2, 'PENDING', 'FAILED'),
+            finished_at = IF(attempts &lt; 2, NULL, #{now}),
+            error_message = IF(attempts &lt; 2, NULL, '任务中断，请重新申请导出'),
+            started_at = NULL, run_token = NULL
+        WHERE id = #{id} AND status = 'RUNNING' AND run_token = #{token}
+    </update>
+    <select id="expired" resultType="entity.ReportJob">
+        SELECT * FROM report_job WHERE status = 'COMPLETED' AND expires_at &lt;= #{now}
+        ORDER BY expires_at, id LIMIT 20
+    </select>
+    <update id="expire">
+        UPDATE report_job SET status = 'EXPIRED', run_token = NULL
+        WHERE id = #{id} AND status = 'COMPLETED' AND run_token = #{token} AND expires_at &lt;= #{now}
+    </update>
+    <select id="activeToken" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM report_job WHERE run_token = #{token} AND status IN ('RUNNING','COMPLETED'))
+    </select>
+</mapper>

@@ -76,6 +76,28 @@ public class KeyFrameStore {
         }
     }
 
+    /** 删除数据库任务指定的受管文件。缺失文件可视为已经清理。 */
+    public void deleteManaged(String relative) throws IOException {
+        if (!relative.matches("alerts/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+\\.jpg")) {
+            throw new IllegalArgumentException("Invalid key frame path");
+        }
+        Path target = root.resolve(relative);
+        if (!target.normalize().equals(target)) {
+            throw new IllegalArgumentException("Invalid key frame path");
+        }
+        try {
+            Path parent = target.getParent().toRealPath();
+            Path expected = root.toRealPath().resolve(root.relativize(target.getParent()));
+            if (!parent.equals(expected) || Files.isSymbolicLink(target)
+                    || Files.exists(target) && !Files.isRegularFile(target)) {
+                throw new IllegalArgumentException("Invalid key frame directory or file");
+            }
+            Files.deleteIfExists(parent.resolve(target.getFileName()));
+        } catch (java.nio.file.NoSuchFileException ignored) {
+            // 重试时文件或目录可能已删除。
+        }
+    }
+
     private Path checkedRealParent(Path target) throws IOException {
         Path parent = target.getParent().toRealPath();
         if (!parent.startsWith(root.toRealPath().resolve("alerts"))) {

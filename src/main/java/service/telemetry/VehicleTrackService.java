@@ -1,0 +1,73 @@
+package service.telemetry;
+
+import common.constant.CommonConstant;
+import common.exception.BusinessException;
+import common.security.UserContext;
+import lombok.RequiredArgsConstructor;
+import mapper.VehicleMapper;
+import mapper.VehicleTelemetryMapper;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
+import vo.telemetry.VehiclePosition;
+import vo.telemetry.VehicleTrack;
+
+import java.util.ArrayList;
+
+@Service
+@RequiredArgsConstructor
+public class VehicleTrackService {
+    private static final int MAX_POINTS = 20_000;
+    private static final long MAX_RANGE_MS = 86_400_000;
+    private static final long MAX_GAP_MS = 30_000;
+    private static final double MAX_IMPLIED_SPEED_KMH = 200;
+    private static final double EARTH_RADIUS_KM = 6371.0088;
+
+    private final VehicleMapper vehicles;
+    private final VehicleTelemetryMapper telemetry;
+
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public VehicleTrack track(long vehicleId, long start, long end, int page, int pageSize) {
+        if (!CommonConstant.ROLE_PLATFORM_ADMIN.equals(UserContext.get().role())) {
+            throw new BusinessException(403, "仅管理员可查询车辆轨迹");
+        }
+        if (vehicleId < 1 || start < 0 || end <= start || end - start > MAX_RANGE_MS
+                || page < 1 || pageSize < 1 || pageSize > 1000) {
+            throw new BusinessException(400, "轨迹范围最多 24 小时，分页条件需有效");
+        }
+        if (vehicles.selectById(vehicleId) == null) { throw new BusinessException(404, "车辆不存在"); }
+        var positions = telemetry.findTrack(vehicleId, start, end, MAX_POINTS + 1);
+        if (positions.size() > MAX_POINTS) { throw new BusinessException(422, "轨迹点过多，请缩小时间范围"); }
+
+        long from = (page - 1L) * pageSize;
+        long to = from + pageSize;
+        var points = new ArrayList<VehicleTrack.Point>();
+        double distanceKm = 0;
+        int segment = 0;
+        VehiclePosition previous = null;
+        for (int i = 0; i < positions.size(); i++) {
+            VehiclePosition current = positions.get(i);
+            double leg = previous == null ? -1 : legDistance(previous, current);
+            if (leg < 0) { segment++; leg = 0; }
+            distanceKm += leg;
+            if (i >= from && i < to) {
+                points.add(new VehicleTrack.Point(current.driverId(), current.sampledAt(), current.latitude(),
+                        current.longitude(), current.speedKmh(), segment, leg));
+            }
+            previous = current;
+        }
+        return new VehicleTrack(vehicleId, start, end, positions.size(), distanceKm, segment, page, pageSize, points);
+    }
+
+    private static double legDistance(VehiclePosition from, VehiclePosition to) {
+        long millis = to.sampledAt() - from.sampledAt();
+        if (!from.driverId().equals(to.driverId()) || millis <= 0 || millis > MAX_GAP_MS) { return -1; }
+        double latFrom = Math.toRadians(from.latitude());
+        double latTo = Math.toRadians(to.latitude());
+        double latHalf = Math.sin((latTo - latFrom) / 2);
+        double lonHalf = Math.sin(Math.toRadians(to.longitude() - from.longitude()) / 2);
+        double haversine = latHalf * latHalf + Math.cos(latFrom) * Math.cos(latTo) * lonHalf * lonHalf;
+        double distance = 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(Math.clamp(haversine, 0, 1)));
+        return distance * 3_600_000 / millis <= MAX_IMPLIED_SPEED_KMH ? distance : -1;
+    }
+}
