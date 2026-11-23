@@ -12,7 +12,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    USE driver_fleet;
    ```
 
-   新库执行 `src/main/resources/db/schema.sql`，创建十八张业务表。已有申诉模块的数据库按顺序执行以下迁移。更旧的数据库先执行告警复核及申诉迁移。应用启动时不会自动执行这些脚本。
+   新库执行 `src/main/resources/db/schema.sql`，创建二十八张业务表。已有申诉模块的数据库按顺序执行以下迁移。更旧的数据库先执行告警复核及申诉迁移。应用启动时不会自动执行这些脚本。
 
    - `src/main/resources/db/migrations/20261119_vehicle_telemetry.sql`
    - `src/main/resources/db/migrations/20261120_alert_key_frame_timeline.sql`
@@ -23,6 +23,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    - `src/main/resources/db/migrations/20261122_report_jobs.sql`
    - `src/main/resources/db/migrations/20261122_recognition_cleanup.sql`
    - `src/main/resources/db/migrations/20261122_vehicle_track_index.sql`
+   - `src/main/resources/db/migrations/20261122_fleet_operations.sql`
 3. 在 `src/main/resources/application.yml` 中配置 `spring.datasource` 的地址、用户名和密码。启动前必须完成建库、建表，因为应用初始化时会查询摄像头表。
 4. 在项目根目录执行：
 
@@ -61,13 +62,15 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 管理员和司机工作台提供只读统计接口。数据口径、角色和接入路径见 [工作台基础统计](docs/dashboard-statistics.md)。
 告警时间线提供 `GET /api/alerts/{id}/key-frames`，按顺序返回可用的前一帧、触发帧和后一帧。权限及前端接入方式见 [告警关键帧时间线](docs/alert-key-frame-timeline.md)。
 
+车队运营提供排班打卡、请假审批、运输任务、维保油耗和证照提醒。接口与移库步骤见 [车队运营联调](docs/fleet-operations.md)。
+
 ## 验证
 
 ```powershell
 # 权限和进程生命周期回归测试，不需要 MySQL、FFmpeg 或推理服务
 .\mvnw.cmd "-Dtest=CameraSecurityTest,FfmpegManagerTest" test
 
-# 全部常规测试：现有 contextLoads 测试需要配置可用的 MySQL 和上述十八张表
+# 全部常规测试：现有 contextLoads 测试需要配置可用的 MySQL 和上述二十八张表
 .\mvnw.cmd test
 ```
 
