@@ -3,6 +3,7 @@ package service.telemetry;
 import common.constant.CommonConstant;
 import common.exception.BusinessException;
 import common.security.UserContext;
+import common.util.GeoDistance;
 import lombok.RequiredArgsConstructor;
 import mapper.VehicleMapper;
 import mapper.VehicleTelemetryMapper;
@@ -21,7 +22,6 @@ public class VehicleTrackService {
     private static final long MAX_RANGE_MS = 86_400_000;
     private static final long MAX_GAP_MS = 30_000;
     private static final double MAX_IMPLIED_SPEED_KMH = 200;
-    private static final double EARTH_RADIUS_KM = 6371.0088;
 
     private final VehicleMapper vehicles;
     private final VehicleTelemetryMapper telemetry;
@@ -62,12 +62,7 @@ public class VehicleTrackService {
     private static double legDistance(VehiclePosition from, VehiclePosition to) {
         long millis = to.sampledAt() - from.sampledAt();
         if (!from.driverId().equals(to.driverId()) || millis <= 0 || millis > MAX_GAP_MS) { return -1; }
-        double latFrom = Math.toRadians(from.latitude());
-        double latTo = Math.toRadians(to.latitude());
-        double latHalf = Math.sin((latTo - latFrom) / 2);
-        double lonHalf = Math.sin(Math.toRadians(to.longitude() - from.longitude()) / 2);
-        double haversine = latHalf * latHalf + Math.cos(latFrom) * Math.cos(latTo) * lonHalf * lonHalf;
-        double distance = 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(Math.clamp(haversine, 0, 1)));
+        double distance = GeoDistance.kilometers(from.latitude(), from.longitude(), to.latitude(), to.longitude());
         return distance * 3_600_000 / millis <= MAX_IMPLIED_SPEED_KMH ? distance : -1;
     }
 }

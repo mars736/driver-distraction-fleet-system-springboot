@@ -8,6 +8,7 @@ import controller.audit.OperationLogController;
 import controller.operations.FleetCareController;
 import controller.operations.OperationsReminderController;
 import controller.operations.WorkforceController;
+import controller.operations.ViolationDispatchController;
 import common.response.Result;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
@@ -28,7 +29,7 @@ import java.io.IOException;
         AppealController.class, AlertLiveController.class, AlertReportController.class,
         DriverScoreController.class, VehicleTelemetryController.class, VehicleLiveStatusController.class,
         OperationLogController.class, WorkforceController.class, FleetCareController.class,
-        OperationsReminderController.class})
+        OperationsReminderController.class, ViolationDispatchController.class})
 @Slf4j
 public class AlertApiExceptionHandler {
     @ExceptionHandler(BusinessException.class)

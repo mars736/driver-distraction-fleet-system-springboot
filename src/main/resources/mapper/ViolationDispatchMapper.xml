@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.ViolationDispatchMapper">
+    <insert id="createFromAlert">
+        INSERT INTO violation_work_order (alert_id,risk_level,latitude,longitude,position_sampled_at,created_at)
+        SELECT a.id,
+               CASE WHEN a.behavior_code IN ('c1','c2','c3','c4') THEN 'HIGH' ELSE 'GENERAL' END,
+               t.latitude,t.longitude,t.sampled_at,UTC_TIMESTAMP(3) + INTERVAL 8 HOUR
+        FROM alert_record a
+        LEFT JOIN vehicle_telemetry t ON t.vehicle_id=a.vehicle_id AND t.driver_id=a.driver_id
+         AND t.sampled_at=(
+            SELECT MAX(p.sampled_at) FROM vehicle_telemetry p
+            WHERE p.vehicle_id=a.vehicle_id AND p.driver_id=a.driver_id
+              AND p.sampled_at BETWEEN (TIMESTAMPDIFF(MICROSECOND,'1970-01-01 08:00:00',a.captured_at) DIV 1000)-15000
+                                   AND TIMESTAMPDIFF(MICROSECOND,'1970-01-01 08:00:00',a.captured_at) DIV 1000
+         )
+        WHERE a.record_type IN ('SMS_ALERT','BACKLOG') AND a.status IN ('OPEN','CONFIRMED')
+          AND a.id=#{alertId}
+        ON DUPLICATE KEY UPDATE alert_id=violation_work_order.alert_id
+    </insert>
+    <update id="cancelForAlert">
+        UPDATE violation_work_order SET status='CANCELED'
+        WHERE alert_id=#{alertId} AND status IN ('PENDING','ASSIGNED','IN_PROGRESS')
+    </update>
+    <select id="alertId" resultType="long">
+        SELECT alert_id FROM violation_work_order WHERE id=#{id}
+    </select>
+    <sql id="orderDetails">
+        SELECT w.id, CONCAT('WO-',w.id) AS order_no,w.alert_id,a.driver_id,a.vehicle_id,a.fleet_id,a.captured_at,
+          a.record_type,a.behavior_code,a.max_p AS confidence,a.status AS alert_status,w.risk_level,w.status,w.latitude,
+          w.longitude,w.position_sampled_at,w.assignee_id,w.assigned_at,w.started_at,w.closed_at,w.closed_by,w.outcome,
+          w.resolution,w.recommendation_action,w.recommendation_note,w.recommendation_by,w.recommendation_at,w.created_at
+        FROM violation_work_order w JOIN alert_record a ON a.id=w.alert_id
+    </sql>
+    <select id="detail" resultType="dto.operations.ViolationDispatch$WorkOrder">
+        <include refid="orderDetails"/> WHERE w.id=#{id}
+    </select>
+    <select id="list" resultType="dto.operations.ViolationDispatch$WorkOrder">
+        <include refid="orderDetails"/>
+        <where>
+            <if test="fleetId != null">AND a.fleet_id=#{fleetId}</if>
+            <if test="driverId != null">AND a.driver_id=#{driverId}</if>
+            <if test="status != null">AND w.status=#{status}</if>
+            <if test="risk != null">AND w.risk_level=#{risk}</if>
+        </where>
+        ORDER BY w.id DESC LIMIT #{size} OFFSET #{offset}
+    </select>
+    <select id="operators" resultType="dto.operations.ViolationDispatch$Operator">
+        SELECT u.id,u.name,p.latitude,p.longitude,p.reported_at,COALESCE(w.active_orders,0)
+        FROM sys_user u LEFT JOIN dispatch_operator_location p ON p.user_id=u.id
+        LEFT JOIN (
+          SELECT assignee_id,COUNT(*) AS active_orders FROM violation_work_order
+          WHERE status IN ('ASSIGNED','IN_PROGRESS') GROUP BY assignee_id
+        ) w ON w.assignee_id=u.id
+        WHERE u.role='PLATFORM_ADMIN' AND u.enabled=1
+        ORDER BY u.id
+    </select>
+    <select id="eligibleOperator" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM sys_user WHERE id=#{id} AND role='PLATFORM_ADMIN' AND enabled=1)
+    </select>
+    <insert id="reportPosition">
+        INSERT INTO dispatch_operator_location(user_id,latitude,longitude,reported_at)
+        VALUES(#{id},#{position.latitude},#{position.longitude},#{now})
+        ON DUPLICATE KEY UPDATE latitude=#{position.latitude},longitude=#{position.longitude},reported_at=#{now}
+    </insert>
+    <update id="assign">
+        UPDATE violation_work_order SET status='ASSIGNED',assignee_id=#{assigneeId},assigned_at=#{now}
+        WHERE id=#{id} AND status='PENDING'
+    </update>
+    <update id="start">
+        UPDATE violation_work_order SET status='IN_PROGRESS',started_at=#{now} WHERE id=#{id} AND status='ASSIGNED'
+    </update>
+    <update id="close">
+        UPDATE violation_work_order SET status='CLOSED',closed_at=#{now},closed_by=#{actor},
+            outcome=#{input.outcome},resolution=#{input.resolution}
+        WHERE id=#{id} AND status='IN_PROGRESS'
+    </update>
+    <select id="confirmedHighRisk" resultType="long">
+        SELECT COUNT(*) FROM alert_record
+        WHERE driver_id=#{driverId} AND status='CONFIRMED' AND record_type IN ('SMS_ALERT','BACKLOG')
+          AND behavior_code IN ('c1','c2','c3','c4') AND captured_at BETWEEN #{from} AND #{to}
+    </select>
+    <update id="decidePersonnel">
+        UPDATE violation_work_order SET recommendation_action=#{input.action},recommendation_note=#{input.note},
+            recommendation_by=#{actor},recommendation_at=#{now}
+        WHERE id=#{id} AND status='CLOSED' AND recommendation_action IS NULL
+    </update>
+</mapper>

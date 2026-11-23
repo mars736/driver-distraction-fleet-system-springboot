@@ -1,0 +1,240 @@
+package regression.operations;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mars736.driverdistractionfleetsystemspringboot.DriverDistractionFleetSystemSpringbootApplication;
+import common.util.JwtUtil;
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.support.TransactionTemplate;
+import service.alert.live.AlertCreatedEvent;
+
+import java.time.LocalDateTime;
+import java.time.YearMonth;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@EnabledIfEnvironmentVariable(named = "DRIVER_FLEET_DB_TESTS", matches = "true")
+@SpringBootTest(classes = DriverDistractionFleetSystemSpringbootApplication.class,
+        properties = "telemetry.offline-monitor.enabled=false")
+@AutoConfigureMockMvc
+class ViolationDispatchIntegrationTest {
+    private static final String API = "/api/operations/violation-dispatch";
+    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+
+    @Autowired JdbcTemplate jdbc;
+    @Autowired MockMvc mvc;
+    @Autowired JwtUtil jwt;
+    @Autowired ObjectMapper json;
+    @Autowired ApplicationEventPublisher events;
+    @Autowired TransactionTemplate transactions;
+
+    private long fleet;
+    private long vehicle;
+    private long otherVehicle;
+    private long driver;
+    private long admin;
+    private long otherAdmin;
+    private LocalDateTime capturedAt;
+    private String key;
+
+    @BeforeEach
+    void fixtures() {
+        capturedAt = LocalDateTime.now(ZONE).truncatedTo(ChronoUnit.SECONDS);
+        key = "dispatch-" + UUID.randomUUID().toString().substring(0, 8);
+        jdbc.update("INSERT INTO fleet(fleet_no,name) VALUES (?,?)", key, "处置测试车队");
+        fleet = jdbc.queryForObject("SELECT id FROM fleet WHERE fleet_no=?", Long.class, key);
+        vehicle = vehicle("A");
+        otherVehicle = vehicle("B");
+        driver = user("driver", "DRIVER");
+        admin = user("admin", "PLATFORM_ADMIN");
+        otherAdmin = user("other", "PLATFORM_ADMIN");
+        jdbc.update("UPDATE sys_user SET vehicle_id=? WHERE id=?", vehicle, driver);
+    }
+
+    @AfterEach
+    void cleanup() {
+        jdbc.update("DELETE FROM alert_appeal_event WHERE appeal_id IN (SELECT id FROM alert_appeal WHERE fleet_id=?)", fleet);
+        jdbc.update("DELETE FROM alert_appeal WHERE fleet_id=?", fleet);
+        jdbc.update("DELETE FROM alert_review_record WHERE alert_id IN (SELECT id FROM alert_record WHERE fleet_id=?)", fleet);
+        jdbc.update("DELETE FROM alert_record WHERE fleet_id=?", fleet);
+        jdbc.update("DELETE FROM recognition_record WHERE fleet_id=?", fleet);
+        jdbc.update("DELETE FROM operation_log WHERE fleet_id=?", fleet);
+        jdbc.update("DELETE FROM dispatch_operator_location WHERE user_id IN (?, ?)", admin, otherAdmin);
+        jdbc.update("DELETE FROM vehicle_telemetry WHERE vehicle_id IN (?, ?)", vehicle, otherVehicle);
+        jdbc.update("DELETE FROM sys_user WHERE fleet_id=?", fleet);
+        jdbc.update("DELETE FROM vehicle WHERE fleet_id=?", fleet);
+        jdbc.update("DELETE FROM fleet WHERE id=?", fleet);
+    }
+
+    @Test
+    void capturesOnlySameVehicleDriverAndEligibleViolationsAndCancelsOnReview() throws Exception {
+        long when = capturedAt.atZone(ZONE).toInstant().toEpochMilli();
+        jdbc.update("INSERT INTO vehicle_telemetry(vehicle_id,driver_id,sampled_at,latitude,longitude) VALUES(?,?,?,?,?)",
+                vehicle, driver, when - 8_000, 24.48, 118.08);
+        jdbc.update("INSERT INTO vehicle_telemetry(vehicle_id,driver_id,sampled_at,latitude,longitude) VALUES(?,?,?,?,?)",
+                vehicle, driver, when + 1, 2.0, 2.0);
+        jdbc.update("INSERT INTO vehicle_telemetry(vehicle_id,driver_id,sampled_at,latitude,longitude) VALUES(?,?,?,?,?)",
+                otherVehicle, driver, when - 1, 9.0, 9.0);
+        long alert = alert("SMS_ALERT", "c1", false);
+        alert("SPEED_UNKNOWN", null, false);
+        alert("BACKLOG", "c5", true);
+        var order = call(HttpMethod.GET, API + "/orders?fleetId=" + fleet, admin, null, 200);
+        assertThat(order).hasSize(1);
+        var row = order.get(0);
+        assertThat(row.path("riskLevel").asText()).isEqualTo("HIGH");
+        assertThat(row.path("latitude").asDouble()).isEqualTo(24.48);
+        assertThat(row.path("positionSampledAt").asLong()).isEqualTo(when - 8_000);
+        call(HttpMethod.GET, API + "/orders", driver, null, 403);
+        review(alert, "REVOKED");
+        assertThat(call(HttpMethod.GET, order(id(row)), admin, null, 200).path("status").asText()).isEqualTo("CANCELED");
+        call(HttpMethod.POST, order(id(row)) + "/assign", admin, Map.of("assigneeId", admin), 409);
+    }
+
+    @Test
+    void ordersWithoutPositionAllowManualAssignmentAndConcurrentAssignmentSucceedsOnce() throws Exception {
+        long order = id(listFor(alert("BACKLOG", "c5", false)));
+        call(HttpMethod.POST, order(order) + "/assign-nearest", admin, null, 409);
+        call(HttpMethod.POST, order(order) + "/assign", admin, Map.of("assigneeId", driver), 400);
+        call(HttpMethod.POST, order(order) + "/close", admin, Map.of("outcome", "HANDLED", "resolution", "完成"), 409);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var first = pool.submit(() -> assignStatus(order, admin));
+            var second = pool.submit(() -> assignStatus(order, otherAdmin));
+            assertThat(List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder(200, 409);
+        }
+        assertThat(call(HttpMethod.GET, order(order), admin, null, 200).path("status").asText()).isEqualTo("ASSIGNED");
+    }
+
+    @Test
+    void ranksOperatorsByDistanceAndActiveLoad() throws Exception {
+        long when = capturedAt.atZone(ZONE).toInstant().toEpochMilli();
+        jdbc.update("INSERT INTO vehicle_telemetry(vehicle_id,driver_id,sampled_at,latitude,longitude) VALUES(?,?,?,?,?)",
+                vehicle, driver, when, 24.48, 118.08);
+        call(HttpMethod.PUT, API + "/operator-position", admin, Map.of("latitude", 24.48, "longitude", 118.08), 200);
+        call(HttpMethod.PUT, API + "/operator-position", otherAdmin, Map.of("latitude", 24.485, "longitude", 118.08), 200);
+        long first = id(listFor(alert("BACKLOG", "c2", false)));
+        long second = id(listFor(alert("BACKLOG", "c4", false)));
+        assertThat(call(HttpMethod.POST, order(first) + "/assign-nearest", admin, null, 200).path("assigneeId").asLong()).isEqualTo(admin);
+        var candidates = call(HttpMethod.GET, order(second) + "/candidates", admin, null, 200);
+        assertThat(candidates.get(0).path("userId").asLong()).isEqualTo(otherAdmin);
+        assertThat(candidates.get(1).path("activeOrders").asLong()).isEqualTo(1);
+        assertThat(call(HttpMethod.POST, order(second) + "/assign-nearest", admin, null, 200).path("assigneeId").asLong()).isEqualTo(otherAdmin);
+    }
+
+    @Test
+    void closingDoesNotDoubleCountAndAppealRetainsTheHandledHistory() throws Exception {
+        long source = alert("SMS_ALERT", "c1", false);
+        review(source, "CONFIRMED");
+        review(alert("BACKLOG", "c2", false), "CONFIRMED");
+        review(alert("BACKLOG", "c4", false), "CONFIRMED");
+        long workOrder = id(listFor(source));
+        int before = score();
+        call(HttpMethod.POST, order(workOrder) + "/assign", admin, Map.of("assigneeId", admin), 200);
+        call(HttpMethod.POST, order(workOrder) + "/start", admin, null, 200);
+        call(HttpMethod.POST, order(workOrder) + "/close", admin, Map.of("outcome", "HANDLED", "resolution", "已完成复核与沟通"), 200);
+        assertThat(score()).isEqualTo(before);
+        String suggestionPath = order(workOrder) + "/personnel-recommendation";
+        var suggestion = call(HttpMethod.GET, suggestionPath, admin, null, 200);
+        assertThat(suggestion.path("eligible").asBoolean()).isTrue();
+        assertThat(suggestion.path("confirmedHighRiskCount").asInt()).isEqualTo(3);
+        var decision = Map.of("action", "TRAINING", "note", "安排安全培训");
+        call(HttpMethod.POST, suggestionPath, admin, decision, 200);
+        call(HttpMethod.POST, suggestionPath, admin, decision, 409);
+        long appeal = id(call(HttpMethod.POST, "/api/appeals", driver,
+                Map.of("targetType", "ALERT", "targetId", source, "reason", "申请核对识别结果"), 200));
+        call(HttpMethod.POST, "/api/appeals/" + appeal + "/decision", admin,
+                Map.of("status", "REVOKED", "reason", "重新核对后撤销"), 200);
+        var updated = call(HttpMethod.GET, order(workOrder), admin, null, 200);
+        assertThat(updated.path("status").asText()).isEqualTo("CLOSED");
+        assertThat(updated.path("alertStatus").asText()).isEqualTo("REVOKED");
+        assertThat(updated.path("recommendationAction").asText()).isEqualTo("TRAINING");
+        assertThat(call(HttpMethod.GET, suggestionPath, admin, null, 200).path("eligible").asBoolean()).isFalse();
+        assertThat(score()).isGreaterThan(before);
+    }
+
+    private int score() throws Exception {
+        String path = "/api/scores/drivers/" + driver + "?month=" + YearMonth.from(capturedAt);
+        return call(HttpMethod.GET, path, admin, null, 200).path("score").asInt();
+    }
+
+    private void review(long alertId, String state) throws Exception {
+        call(HttpMethod.POST, "/api/alerts/" + alertId + "/reviews", admin, Map.of("status", state, "reason", "处置测试复核"), 200);
+    }
+
+    private long alert(String type, String behavior, boolean rollback) {
+        return transactions.execute(tx -> {
+            String source = UUID.randomUUID().toString();
+            jdbc.update("""
+                    INSERT INTO recognition_record(source_key,source_frame_id,vehicle_id,driver_id,fleet_id,captured_at,
+                        pred,behavior_code,max_p,ood,participated,decision_reason,speed_status)
+                    VALUES (?,1,?,?,?,?,1,?,0.95,0,1,'EVALUATED','KNOWN')
+                    """, source, vehicle, driver, fleet, capturedAt, behavior);
+            long recognition = jdbc.queryForObject("SELECT id FROM recognition_record WHERE source_key=?", Long.class, source);
+            jdbc.update("""
+                    INSERT INTO alert_record(recognition_id,vehicle_id,driver_id,fleet_id,captured_at,behavior_code,max_p,record_type,sms_status)
+                    VALUES (?,?,?,?,?,?,0.95,?,'NOT_REQUIRED')
+                    """, recognition, vehicle, driver, fleet, capturedAt, behavior, type);
+            long id = jdbc.queryForObject("SELECT id FROM alert_record WHERE recognition_id=?", Long.class, recognition);
+            var event = new AlertCreatedEvent(id, driver, vehicle, fleet, capturedAt, type, behavior);
+            events.publishEvent(event);
+            events.publishEvent(event);
+            if (rollback) { tx.setRollbackOnly(); }
+            return id;
+        });
+    }
+
+    private JsonNode listFor(long alert) throws Exception {
+        var result = call(HttpMethod.GET, API + "/orders?fleetId=" + fleet, admin, null, 200);
+        for (JsonNode row : result) {
+            if (row.path("alertId").asLong() == alert) { return row; }
+        }
+        throw new AssertionError("未生成告警工单 " + alert);
+    }
+
+    private int assignStatus(long workOrder, long assignee) throws Exception {
+        return mvc.perform(request(HttpMethod.POST, order(workOrder) + "/assign")
+                        .header("Authorization", "Bearer " + jwt.generateToken(admin, 0))
+                        .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(Map.of("assigneeId", assignee))))
+                .andReturn().getResponse().getStatus();
+    }
+
+    private JsonNode call(HttpMethod method, String path, long actor, Object body, int expected) throws Exception {
+        var req = request(method, path).header("Authorization", "Bearer " + jwt.generateToken(actor, 0));
+        if (body != null) { req.contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(body)); }
+        var result = mvc.perform(req).andExpect(status().is(expected)).andReturn().getResponse();
+        return json.readTree(result.getContentAsByteArray()).path("data");
+    }
+
+    private long vehicle(String suffix) {
+        String plate = key.substring("dispatch-".length()) + suffix;
+        jdbc.update("INSERT INTO vehicle(fleet_id,plate_no) VALUES (?,?)", fleet, plate);
+        return jdbc.queryForObject("SELECT id FROM vehicle WHERE plate_no=?", Long.class, plate);
+    }
+
+    private long user(String suffix, String role) {
+        String name = key + "-" + suffix;
+        jdbc.update("INSERT INTO sys_user(username,password,name,fleet_id,role) VALUES (?,'unused',?,?,?)", name, name, fleet, role);
+        return jdbc.queryForObject("SELECT id FROM sys_user WHERE username=?", Long.class, name);
+    }
+
+    private static String order(long id) { return API + "/orders/" + id; }
+    private static long id(JsonNode node) { return node.path("id").asLong(); }
+}

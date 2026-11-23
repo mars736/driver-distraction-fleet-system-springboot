@@ -142,6 +142,8 @@ class AlertPersistenceIntegrationTest {
         assertThat(alerts).hasSize(1);
         AlertRecord alert = alerts.get(0);
         assertThat(alert.getRecordType()).isEqualTo("SMS_ALERT");
+        assertThat(jdbc.queryForObject("SELECT risk_level FROM violation_work_order WHERE alert_id=?",
+                String.class, alert.getId())).isEqualTo("HIGH");
         assertThat(alert.getSmsStatus()).isEqualTo("PENDING");
         assertThat(Files.readAllBytes(uploads.resolve(alert.getKeyFramePath()))).isEqualTo(jpeg());
         dispatcher.dispatch(alerts);
