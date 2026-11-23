@@ -11,7 +11,9 @@ import service.audit.OperationLogService;
 import mapper.AlertReviewMapper;
 import mapper.AppealMapper;
 import mapper.UserMapper;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import service.alert.live.AlertRevokedEvent;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -26,6 +28,7 @@ public class AlertReviewService {
     private final AlertQueryService queryService;
     private final AppealMapper appealMapper;
     private final OperationLogService audit;
+    private final ApplicationEventPublisher events;
 
     @Transactional
     public AlertReviewRecord review(long id, AlertReviewRequest request) {
@@ -71,6 +74,9 @@ public class AlertReviewService {
         record.setOperatedAt(LocalDateTime.now(ZoneId.of("Asia/Shanghai")).truncatedTo(ChronoUnit.MILLIS));
         if (mapper.insertReview(record) != 1) { throw new IllegalStateException("告警处理记录保存失败"); }
         audit.success(OperationAction.ALERT_REVIEW, id, alert.getFleetId(), request.getStatus().name());
+        if (request.getStatus() == AlertStatus.REVOKED) {
+            events.publishEvent(new AlertRevokedEvent(id, alert.getFleetId()));
+        }
         return record;
     }
 

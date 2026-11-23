@@ -18,6 +18,7 @@ import vo.dashboard.DashboardView.*;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
@@ -42,6 +43,15 @@ public class DashboardService {
         LocalDate today = LocalDate.now(BUSINESS_ZONE);
         var scope = daily(today, fleetId, null, null);
         return new Overview(today, fleetId, mapper.fleetSize(fleetId), recognitions(scope), mapper.alertCounts(scope));
+    }
+
+    public FleetRange range(Long fleetId, LocalDateTime start, LocalDateTime end) {
+        requireRole(CommonConstant.ROLE_PLATFORM_ADMIN);
+        var fleet = fleetId == null ? null : fleets.selectById(fleetId);
+        if (fleetId != null && fleet == null) { throw new BusinessException(404, "车队不存在"); }
+        var scope = new Scope(start, end, fleetId, null, null);
+        return new FleetRange(fleetId, fleet == null ? "全部车队" : fleet.getName(), start, end,
+                mapper.fleetSize(fleetId), recognitions(scope), mapper.alertCounts(scope));
     }
 
     public VehicleDaily vehicle(long vehicleId) {

@@ -8,6 +8,8 @@ import java.util.List;
 
 @Mapper
 public interface VehicleTelemetryMapper {
+    List<VehiclePosition> findTrack(@Param("vehicleId") long vehicleId, @Param("start") long start,
+                                    @Param("end") long end, @Param("limit") int limit);
     Long lockDriverBinding(@Param("driverId") long driverId, @Param("vehicleId") long vehicleId);
 
     void insertSample(@Param("vehicleId") long vehicleId, @Param("driverId") long driverId,

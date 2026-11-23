@@ -33,10 +33,7 @@ public class RecognitionQueryService {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PageResult<RecognitionView> list(RecognitionQueryRequest request) {
         Long owner = owner();
-        LocalDateTime start = parseTime(request.getStartTime()), end = parseTime(request.getEndTime());
-        if (start != null && end != null && !start.isBefore(end)) { throw new BusinessException(400, "startTime 必须早于 endTime"); }
-        var filter = new RecognitionQueryFilter(request.getFleetId(), request.getVehicleId(), request.getDriverId(), request.getCameraId(),
-                owner, request.getBehaviorCode(), request.getOod(), request.getParticipated(), start, end);
+        var filter = filter(request, owner);
         // 记录、总数、告警和申诉使用同一快照，避免查询中途的复核提交造成结果互相矛盾。
         long total = mapper.count(filter);
         var rows = mapper.list(filter, ((long) request.getPage() - 1) * request.getPageSize(), request.getPageSize());
@@ -63,6 +60,23 @@ public class RecognitionQueryService {
             }
             return actual;
         } catch (IOException | InvalidPathException e) { throw new BusinessException(404, "关键帧不存在"); }
+    }
+
+    @Transactional(readOnly = true)
+    public List<RecognitionView> exportRows(RecognitionQueryRequest request) {
+        if (!CommonConstant.ROLE_PLATFORM_ADMIN.equals(UserContext.get().role())) {
+            throw new BusinessException(403, "仅管理员可导出识别记录");
+        }
+        var rows = mapper.list(filter(request, null), 0, 10_001);
+        if (rows.size() > 10_000) { throw new BusinessException(422, "识别记录超过 10000 条，请缩小筛选范围"); }
+        return rows;
+    }
+
+    private RecognitionQueryFilter filter(RecognitionQueryRequest request, Long owner) {
+        LocalDateTime start = parseTime(request.getStartTime()), end = parseTime(request.getEndTime());
+        if (start != null && end != null && !start.isBefore(end)) { throw new BusinessException(400, "startTime 必须早于 endTime"); }
+        return new RecognitionQueryFilter(request.getFleetId(), request.getVehicleId(), request.getDriverId(),
+                request.getCameraId(), owner, request.getBehaviorCode(), request.getOod(), request.getParticipated(), start, end);
     }
 
     private RecognitionView accessible(long id, Long owner) {

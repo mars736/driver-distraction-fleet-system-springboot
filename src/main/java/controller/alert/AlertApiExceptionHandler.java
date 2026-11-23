@@ -5,6 +5,10 @@ import controller.score.DriverScoreController;
 import controller.telemetry.VehicleTelemetryController;
 import controller.telemetry.VehicleLiveStatusController;
 import controller.audit.OperationLogController;
+import controller.operations.FleetCareController;
+import controller.operations.OperationsReminderController;
+import controller.operations.WorkforceController;
+import controller.operations.ViolationDispatchController;
 import common.response.Result;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
@@ -19,12 +23,13 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.ErrorResponse;
 import java.io.IOException;
 
-/** 告警、评分和车辆定位上报接口使用真实 HTTP 状态码。 */
+/** 为业务接口保留实际 HTTP 状态码和统一错误正文。 */
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(assignableTypes = {AlertQueryController.class, AlertReviewController.class,
         AppealController.class, AlertLiveController.class, AlertReportController.class,
         DriverScoreController.class, VehicleTelemetryController.class, VehicleLiveStatusController.class,
-        OperationLogController.class})
+        OperationLogController.class, WorkforceController.class, FleetCareController.class,
+        OperationsReminderController.class, ViolationDispatchController.class})
 @Slf4j
 public class AlertApiExceptionHandler {
     @ExceptionHandler(BusinessException.class)
@@ -54,8 +59,8 @@ public class AlertApiExceptionHandler {
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(Result.error(error.getStatusCode().value(), "请求类型或响应格式不受支持"));
         }
-        log.error("告警接口执行失败，异常类型={}", exception.getClass().getSimpleName());
+        log.error("业务接口执行失败，异常类型={}", exception.getClass().getSimpleName());
         return ResponseEntity.internalServerError().contentType(MediaType.APPLICATION_JSON)
-                .body(Result.error(500, "告警操作失败，请稍后重试"));
+                .body(Result.error(500, "请求处理失败，请稍后重试"));
     }
 }

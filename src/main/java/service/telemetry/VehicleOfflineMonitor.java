@@ -4,7 +4,6 @@ import entity.Vehicle;
 import lombok.RequiredArgsConstructor;
 import mapper.VehicleTelemetryMapper;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import service.vehicle.VehicleService;
@@ -13,7 +12,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Component
-@EnableScheduling
 @ConditionalOnProperty(name = "telemetry.offline-monitor.enabled", matchIfMissing = true)
 @RequiredArgsConstructor
 public class VehicleOfflineMonitor {

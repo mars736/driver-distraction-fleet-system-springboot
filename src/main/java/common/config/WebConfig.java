@@ -27,7 +27,8 @@ public class WebConfig implements WebMvcConfigurer {
         // 末尾必须带 /，否则会把目录当文件解析
         String location = uploadDir.endsWith("/") ? uploadDir : uploadDir + "/";
         Path uploadRoot = Path.of(uploadDir).toAbsolutePath().normalize();
-        var privateDirs = java.util.List.of(uploadRoot.resolve("alerts"), uploadRoot.resolve("appeals"));
+        var privateNames = java.util.List.of("alerts", "appeals", "reports");
+        var privateDirs = privateNames.stream().map(uploadRoot::resolve).toList();
         registry.addResourceHandler("/upload/**")
                 .addResourceLocations("file:" + location)
                 .resourceChain(false)
@@ -36,7 +37,7 @@ public class WebConfig implements WebMvcConfigurer {
                     protected Resource getResource(String resourcePath, Resource root) throws IOException {
                         // Windows 文件系统不区分大小写，不能仅依赖 URL 大小写敏感的安全匹配。
                         String normalized = resourcePath.replace('\\', '/');
-                        for (String name : java.util.List.of("alerts", "appeals")) {
+                        for (String name : privateNames) {
                             if (normalized.equalsIgnoreCase(name) || normalized.regionMatches(true, 0, name + "/", 0, name.length() + 1)) {
                                 return null;
                             }

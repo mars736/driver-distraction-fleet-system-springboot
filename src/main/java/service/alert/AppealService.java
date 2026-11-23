@@ -10,7 +10,9 @@ import lombok.RequiredArgsConstructor;
 import service.audit.OperationAction;
 import service.audit.OperationLogService;
 import mapper.*;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import service.alert.live.AlertRevokedEvent;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
@@ -28,6 +30,7 @@ import java.util.Objects;
 @RequiredArgsConstructor
 public class AppealService {
     private final OperationLogService audit;
+    private final ApplicationEventPublisher events;
     private final AppealMapper mapper;
     private final AlertReviewMapper reviewMapper;
     private final UserMapper userMapper;
@@ -136,6 +139,9 @@ public class AppealService {
             // CONFIRMED→CONFIRMED 也是一次复核，MySQL 可能报告 0 个实际变更行。
             if (!alert.getStatus().equals(request.getStatus().name())) {
                 requireWrite(reviewMapper.updateReviewableStatus(alert.getId(), request.getStatus().name()));
+                if (request.getStatus() == AlertStatus.REVOKED) {
+                    events.publishEvent(new AlertRevokedEvent(alert.getId(), alert.getFleetId()));
+                }
             }
             var review = new AlertReviewRecord();
             review.setAlertId(alert.getId()); review.setFromStatus(alert.getStatus()); review.setToStatus(request.getStatus().name());

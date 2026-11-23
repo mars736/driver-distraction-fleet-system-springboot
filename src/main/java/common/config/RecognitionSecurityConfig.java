@@ -26,6 +26,8 @@ public class RecognitionSecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.GET, "/api/recognitions", "/api/recognitions/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
                         .requestMatchers(HttpMethod.HEAD, "/api/recognitions", "/api/recognitions/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
+                        .requestMatchers(HttpMethod.DELETE, "/api/recognitions/*").hasRole("PLATFORM_ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/recognitions/batch-delete").hasRole("PLATFORM_ADMIN")
                         .anyRequest().denyAll())
                 .addFilterBefore(jwt, UsernamePasswordAuthenticationFilter.class).build();
     }

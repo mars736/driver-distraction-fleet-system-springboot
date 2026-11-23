@@ -15,7 +15,7 @@ import vo.recognition.RecognitionView;
 import java.io.IOException;
 import java.nio.file.Files;
 
-/** 查询入口不提供修改、删除或重新判定，避免影响告警、申诉和评分的数据来源。 */
+/** 识别记录及关键帧的查询入口。 */
 @RestController
 @RequestMapping("/api/recognitions")
 @RequiredArgsConstructor
