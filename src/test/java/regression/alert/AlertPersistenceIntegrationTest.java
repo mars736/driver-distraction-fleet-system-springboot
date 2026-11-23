@@ -9,6 +9,7 @@ import inferworker.*;
 import mapper.AlertDecisionMapper;
 import mapper.AlertTimelineMapper;
 import mapper.VehicleMapper;
+import mapper.SmsDeliveryMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import service.alert.*;
 import service.alert.rule.AlertRuleEngine;
 import service.alert.rule.VehicleAlertState;
+import service.alert.sms.SmsChannelProperties;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -84,6 +86,8 @@ class AlertPersistenceIntegrationTest {
     @Autowired AlertDecisionService service;
     @Autowired SmsDispatcher dispatcher;
     @Autowired AlertDecisionMapper mapper;
+    @Autowired SmsDeliveryMapper deliveries;
+    @Autowired SmsChannelProperties smsProperties;
     @Autowired AlertTimelineMapper timelineMapper;
     @Autowired VehicleMapper vehicles;
     @Autowired AlertRuleEngine engine;
@@ -270,6 +274,51 @@ class AlertPersistenceIntegrationTest {
     }
 
     @Test
+    void realModeCommitsExactlyOneSendJobAndDoesNotUseSimulation() throws Exception {
+        SmsChannelProperties realProperties = new SmsChannelProperties();
+        realProperties.setMode(SmsChannelProperties.Mode.ALIYUN);
+        realProperties.getAliyun().setOutIdPrefix("integration");
+        AlertDecisionService realMode = new AlertDecisionService(mapper, vehicles, speed, engine, json, keyFrames,
+                new AlertTimelineCapture(timelineMapper, keyFrames), event -> {}, deliveries, realProperties);
+        var transaction = new TransactionTemplate(transactions);
+        CapturedInference last = null;
+        for (int i = 0; i < 5; i++) {
+            CapturedInference frame = input(1, false);
+            transaction.executeWithoutResult(ignored -> processRealMode(realMode, frame));
+            last = frame;
+        }
+        CapturedInference repeated = last;
+        transaction.executeWithoutResult(ignored -> processRealMode(realMode, repeated));
+
+        assertThat(jdbc.queryForList("SELECT d.out_id FROM sms_delivery d JOIN alert_record a ON a.id=d.alert_id"
+                + " WHERE a.vehicle_id=?", String.class, vehicleId)).hasSize(1).allMatch(id -> id.startsWith("integration-"));
+        assertThat(count("alert_record")).isEqualTo(1);
+    }
+
+    private void processRealMode(AlertDecisionService realMode, CapturedInference frame) {
+        try {
+            assertThat(realMode.process(frame, false)).isEmpty();
+        } catch (IOException ex) {
+            throw new UncheckedIOException(ex);
+        }
+    }
+
+    @Test
+    void reconnectRestartsFrameSequenceWithoutCountingAcrossStreams() throws Exception {
+        for (int i = 0; i < 4; i++) { service.process(inStream(input(1, false), "first"), false); }
+        assertThat(service.process(inStream(input(1, false), "second"), false)).isEmpty();
+        assertThat(state().getSmsFrames()).isEqualTo(1);
+        for (int i = 0; i < 3; i++) { service.process(inStream(input(1, false), "second"), false); }
+        assertThat(service.process(inStream(input(1, false), "second"), false)).hasSize(1);
+    }
+
+    private CapturedInference inStream(CapturedInference frame, String streamId) {
+        return new CapturedInference(frame.sourceKey(), frame.frameId(), frame.cameraId(), frame.vehicleId(),
+                frame.driverId(), frame.capturedAt(), frame.pred(), frame.ood(), frame.maxP(), frame.energy(),
+                frame.knnDist(), frame.jpeg(), streamId);
+    }
+
+    @Test
     void duplicateInputDoesNotDoubleCountOrResend() throws Exception {
         for (int i = 0; i < 4; i++) { service.process(input(1, false), false); }
         CapturedInference fifth = input(1, false);
@@ -284,7 +333,8 @@ class AlertPersistenceIntegrationTest {
     void stateRestoresIntoNewServiceInstance() throws Exception {
         for (int i = 0; i < 4; i++) { service.process(input(1, false), false); }
         AlertDecisionService restarted = new AlertDecisionService(mapper, vehicles, speed, engine, json, keyFrames,
-                new AlertTimelineCapture(timelineMapper, keyFrames), event -> {});
+                new AlertTimelineCapture(timelineMapper, keyFrames), event -> {},
+                deliveries, smsProperties);
         CapturedInference fifth = input(3, false);
         List<AlertRecord> alerts = new TransactionTemplate(transactions).execute(status -> {
             try { return restarted.process(fifth, false); }

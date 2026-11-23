@@ -35,4 +35,27 @@
 - 摄像头的车辆和司机配置须与 App 上报一致。后端取该车、该司机在帧采集时刻之前或同一时刻的最近样本，按 `m/s × 3.6` 换算，最多使用 15 秒前的样本。
 - 用 1.25 m/s 上报后输入一帧有效的 C1。用管理员查询 `GET /api/recognitions`，应看到 4.5 km/h、`KNOWN` 和 `LOW_SPEED`，该帧不产生行为告警。
 - 停止上报，等采样时间过去 15 秒后再输入识别帧。应看到 `UNKNOWN`，从已知切到未知时应产生一条 `SPEED_UNKNOWN`。若最近样本的车速为 `null`，也按未知处理。
-- 位置信息存入 `vehicle_telemetry`。地图轨迹查询、里程、围栏和主动离线推送属于后续功能。
+- 位置信息存入 `vehicle_telemetry`。地图轨迹查询、里程和围栏属于后续功能。
+
+## 管理端车辆实时状态
+
+平台管理员可用 `GET /api/vehicles/live-status?fleetId=1&page=1&pageSize=10` 查询车辆定位状态。
+省略 `fleetId` 时查询所有车队，单页最多 100 辆。响应沿用分页结构。
+
+每项返回 `vehicleId`、`fleetId`、`plateNo`、`online`、`sampledAt`、
+`latitude`、`longitude`、`speedKmh`。在线指当前有效绑定司机在最近 15 秒内有定位样本，
+与摄像头是否在线无关。过期样本仍返回最后位置和采样时间，实时车速为空。
+没有有效绑定司机的样本时，车辆显示离线，采样时间、位置和车速均为空。
+司机账号无权访问此接口。
+
+## 管理端主动离线通知
+
+已有库在启动新版前执行 `20261121_vehicle_offline_notice.sql`。默认每 5 秒扫描启用监控的车辆。
+有过定位上报且最新样本超过 15 秒时，会在去重记录提交后向平台管理员的
+`GET /api/alerts/stream` 连接发送 `event: vehicle-offline`。
+事件包含 `vehicleId`、`fleetId`、`sampledAt` 和 `detectedAt`，时间为 Unix 毫秒。
+车从未上报时只在查询接口显示离线。新样本恢复上报后再次超时，可触发新的通知。
+
+实时通知沿用单实例 SSE。断线期间可重新查询 `/api/vehicles/live-status` 获取当前状态。
+可通过 `telemetry.offline-monitor.enabled=false` 关闭扫描，或配置
+`telemetry.offline-monitor.interval-ms` 调整扫描间隔。

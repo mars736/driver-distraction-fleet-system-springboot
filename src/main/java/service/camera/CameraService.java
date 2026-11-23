@@ -7,6 +7,10 @@ import lombok.extern.slf4j.Slf4j;
 import mapper.CameraMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import service.audit.OperationAction;
+import service.audit.OperationLogService;
 import video.FfmpegManager;
 
 import java.util.List;
@@ -21,6 +25,7 @@ public class CameraService {
 
     private final CameraMapper cameraMapper;
     private final FfmpegManager ffmpegManager;
+    private final OperationLogService audit;
 
     /** 启动时从数据库加载并启动所有启用的摄像头 */
     @PostConstruct
@@ -43,19 +48,18 @@ public class CameraService {
     @Transactional
     public Camera create(Camera camera) {
         cameraMapper.insert(camera);   // insert 后主键回填到 camera.id
-        if (Boolean.TRUE.equals(camera.getEnabled())) {
-            ffmpegManager.start(camera);
-        }
+        audit.cameraChange(OperationAction.CAMERA_CREATE, camera.getId(), camera.getVehicleId());
+        applyAfterCommit(camera.getId(), false);
         return camera;
     }
 
     @Transactional
     public Camera update(Camera camera) {
         cameraMapper.update(camera);
-        if (Boolean.TRUE.equals(camera.getEnabled())) {
-            ffmpegManager.restart(camera);   // 改了地址就重启生效
-        } else {
-            ffmpegManager.stop(camera.getId());
+        Camera updated = cameraMapper.selectById(camera.getId());
+        if (updated != null) {
+            audit.cameraChange(OperationAction.CAMERA_UPDATE, camera.getId(), updated.getVehicleId());
+            applyAfterCommit(camera.getId(), true);
         }
         return camera;
     }
@@ -63,19 +67,34 @@ public class CameraService {
     @Transactional
     public void updateEnabled(Long id, boolean enabled) {
         cameraMapper.updateEnabled(id, enabled);
-        if (enabled) {
-            Camera camera = cameraMapper.selectById(id);
-            if (camera != null) {
-                ffmpegManager.start(camera);
-            }
-        } else {
-            ffmpegManager.stop(id);
-        }
+        Camera camera = cameraMapper.selectById(id);
+        if (camera != null) { audit.cameraChange(OperationAction.CAMERA_ENABLED, id, camera.getVehicleId()); }
+        applyAfterCommit(id, false);
     }
 
     @Transactional
     public void delete(Long id) {
-        ffmpegManager.stop(id);
+        Camera camera = cameraMapper.selectById(id);
         cameraMapper.deleteById(id);
+        if (camera != null) { audit.cameraChange(OperationAction.CAMERA_DELETE, id, camera.getVehicleId()); }
+        applyAfterCommit(id, false);
+    }
+
+    private void applyAfterCommit(Long id, boolean restart) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() { applyCommittedConfig(id, restart); }
+        });
+    }
+
+    private synchronized void applyCommittedConfig(Long id, boolean restart) {
+        Camera camera = cameraMapper.selectById(id);
+        if (camera == null || !Boolean.TRUE.equals(camera.getEnabled())) {
+            ffmpegManager.stop(id);
+        } else if (restart) {
+            ffmpegManager.restart(camera);
+        } else {
+            ffmpegManager.start(camera);
+        }
     }
 }

@@ -4,6 +4,8 @@ import common.exception.BusinessException;
 import common.response.PageResult;
 import entity.Vehicle;
 import lombok.RequiredArgsConstructor;
+import service.audit.OperationAction;
+import service.audit.OperationLogService;
 import lombok.extern.slf4j.Slf4j;
 import mapper.FleetMapper;
 import mapper.VehicleMapper;
@@ -22,6 +24,7 @@ public class VehicleService {
 
     private final VehicleMapper vehicleMapper;
     private final FleetMapper fleetMapper;
+    private final OperationLogService audit;
 
     public PageResult<Vehicle> list(Long fleetId, Integer page, Integer pageSize) {
         int currentPage = (page == null || page < 1) ? 1 : page;
@@ -51,6 +54,7 @@ public class VehicleService {
             vehicle.setMonitorEnabled(1);
         }
         vehicleMapper.insert(vehicle);
+        audit.success(OperationAction.VEHICLE_CREATE, vehicle.getId(), vehicle.getFleetId());
         log.info("新增车辆 id={}, plateNo={}", vehicle.getId(), vehicle.getPlateNo());
         return vehicle;
     }
@@ -63,19 +67,23 @@ public class VehicleService {
             throw new BusinessException("车牌号已存在");
         }
         vehicleMapper.update(vehicle);
+        audit.success(OperationAction.VEHICLE_UPDATE, vehicle.getId(), vehicle.getFleetId());
         return vehicle;
     }
 
     @Transactional
     public void updateMonitorEnabled(Long id, Integer monitorEnabled) {
-        getById(id);
+        Vehicle vehicle = getById(id);
         vehicleMapper.updateMonitorEnabled(id, monitorEnabled);
+        audit.success(OperationAction.VEHICLE_MONITOR, id, vehicle.getFleetId(),
+                Integer.valueOf(1).equals(monitorEnabled) ? "ENABLED" : "DISABLED");
     }
 
     @Transactional
     public void delete(Long id) {
-        getById(id);
+        Vehicle vehicle = getById(id);
         vehicleMapper.deleteById(id);
+        audit.success(OperationAction.VEHICLE_DELETE, id, vehicle.getFleetId());
         log.info("删除车辆 id={}", id);
     }
 

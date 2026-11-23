@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.SmsDeliveryMapper">
+    <insert id="enqueue">
+        INSERT INTO sms_delivery (alert_id, out_id) VALUES (#{alertId}, #{outId})
+    </insert>
+    <sql id="jobColumns">
+        a.id AS alert_id, a.driver_id, a.vehicle_id, a.sms_status AS status,
+        d.out_id, d.recipient, d.attempted_at, d.provider_message_id
+    </sql>
+    <select id="pending" resultType="service.alert.sms.SmsDeliveryJob">
+        SELECT <include refid="jobColumns"/>
+        FROM sms_delivery d JOIN alert_record a ON a.id = d.alert_id
+        WHERE a.sms_status = 'PENDING'
+        ORDER BY d.alert_id LIMIT #{limit}
+    </select>
+    <select id="due" resultType="service.alert.sms.SmsDeliveryJob">
+        SELECT <include refid="jobColumns"/>
+        FROM sms_delivery d JOIN alert_record a ON a.id = d.alert_id
+        WHERE d.next_check_at &lt;= #{now} AND a.sms_status IN ('SENDING', 'SENT', 'SEND_UNKNOWN')
+        ORDER BY d.next_check_at, d.alert_id LIMIT #{limit}
+    </select>
+    <update id="skipRevoked">
+        UPDATE sms_delivery d JOIN alert_record a ON a.id = d.alert_id
+        SET a.sms_status = 'SKIPPED_REVOKED'
+        WHERE d.alert_id = #{id} AND a.sms_status = 'PENDING' AND a.status = 'REVOKED'
+    </update>
+    <update id="claim">
+        UPDATE sms_delivery d JOIN alert_record a ON a.id = d.alert_id
+        SET a.sms_status = 'SENDING', d.recipient = #{recipient}, d.attempted_at = #{now},
+            d.next_check_at = #{nextCheckAt}
+        WHERE d.alert_id = #{id} AND a.sms_status = 'PENDING' AND a.status &lt;&gt; 'REVOKED'
+    </update>
+    <update id="reserveCheck">
+        UPDATE sms_delivery d JOIN alert_record a ON a.id = d.alert_id
+        SET d.next_check_at = #{nextCheckAt}
+        WHERE d.alert_id = #{id} AND a.sms_status = #{expected} AND d.next_check_at &lt;= #{now}
+    </update>
+    <update id="finish">
+        UPDATE sms_delivery d JOIN alert_record a ON a.id = d.alert_id
+        SET a.sms_status = #{status}, d.provider_message_id = COALESCE(#{providerMessageId}, d.provider_message_id),
+            d.provider_code = #{providerCode}, d.next_check_at = #{nextCheckAt},
+            d.recipient = CASE WHEN #{nextCheckAt} IS NULL THEN NULL ELSE d.recipient END
+        WHERE d.alert_id = #{id} AND a.sms_status = #{expected}
+    </update>
+</mapper>

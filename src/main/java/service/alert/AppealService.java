@@ -7,6 +7,8 @@ import common.security.UserContext;
 import dto.alert.*;
 import entity.*;
 import lombok.RequiredArgsConstructor;
+import service.audit.OperationAction;
+import service.audit.OperationLogService;
 import mapper.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +27,7 @@ import java.util.Objects;
 @Service
 @RequiredArgsConstructor
 public class AppealService {
+    private final OperationLogService audit;
     private final AppealMapper mapper;
     private final AlertReviewMapper reviewMapper;
     private final UserMapper userMapper;
@@ -145,6 +148,7 @@ public class AppealService {
         appeal.setReviewerId(actor.getId()); appeal.setReviewedAt(now()); appeal.setUpdateTime(appeal.getReviewedAt());
         requireWrite(mapper.finish(appeal));
         event(appeal, actor, appeal.getStatus().name(), reason, reviewId, null);
+        audit.success(OperationAction.APPEAL_DECIDE, id, appeal.getFleetId(), appeal.getStatus().name());
         return appeal;
     }
 

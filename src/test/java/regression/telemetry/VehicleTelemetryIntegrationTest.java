@@ -21,6 +21,7 @@ import service.alert.VehicleSpeedProvider;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -108,6 +109,32 @@ class VehicleTelemetryIntegrationTest {
         report(driver, sampledAt + 60_000, "1").andExpect(status().isBadRequest());
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM vehicle_telemetry WHERE vehicle_id = ?",
                 Integer.class, vehicle)).isZero();
+    }
+
+    @Test
+    void liveStatusUsesCurrentBindingAndHidesStaleSpeedFromAdmin() throws Exception {
+        long admin = jdbc.queryForObject("SELECT id FROM sys_user WHERE username = 'admin'", Long.class);
+        var query = get("/api/vehicles/live-status").param("fleetId", Long.toString(fleet));
+        mvc.perform(query.header("Authorization", "Bearer " + jwt.generateToken(driver, 0)))
+                .andExpect(status().isForbidden());
+
+        var adminQuery = get("/api/vehicles/live-status").param("fleetId", Long.toString(fleet))
+                .header("Authorization", "Bearer " + jwt.generateToken(admin, 0));
+        report(driver, sampledAt - 60_000, "2.5").andExpect(status().isOk());
+        mvc.perform(adminQuery).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].online").value(false))
+                .andExpect(jsonPath("$.data.list[0].latitude").value(24.48))
+                .andExpect(jsonPath("$.data.list[0].speedKmh").isEmpty());
+
+        report(driver, System.currentTimeMillis(), "1.25").andExpect(status().isOk());
+        mvc.perform(adminQuery).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].online").value(true))
+                .andExpect(jsonPath("$.data.list[0].speedKmh").value(4.5));
+
+        jdbc.update("UPDATE sys_user SET vehicle_id = NULL WHERE id = ?", driver);
+        mvc.perform(adminQuery).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].online").value(false))
+                .andExpect(jsonPath("$.data.list[0].sampledAt").isEmpty());
     }
 
     private long createDriver(String username, Long vehicleId) {

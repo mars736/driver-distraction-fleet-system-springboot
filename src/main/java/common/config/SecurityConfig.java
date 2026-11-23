@@ -76,6 +76,7 @@ public class SecurityConfig {
                 ).permitAll()
                 .requestMatchers("/api/auth/users/**").hasRole("PLATFORM_ADMIN")//「禁用/启用账号」这个接口只有平台管理员能调。
                 .requestMatchers("/api/fleets/**", "/api/vehicles/**", "/api/drivers/**").hasRole("PLATFORM_ADMIN")//三个档案接口只有平台管理员能管。
+                .requestMatchers("/api/operation-logs", "/api/operation-logs/**").hasRole("PLATFORM_ADMIN")
                 .requestMatchers("/api/cameras", "/api/cameras/**").hasRole("PLATFORM_ADMIN")//摄像头配置的读写接口都属于管理员功能。
                 .requestMatchers("/upload/alerts", "/upload/alerts/**", "/upload/appeals", "/upload/appeals/**").denyAll()
                 // 角色决定能执行哪类操作；具体记录是否属于该司机，还要由 Service 再检查。

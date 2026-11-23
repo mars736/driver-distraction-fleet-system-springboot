@@ -27,4 +27,11 @@ public class InferFrame {
 
     /** JPEG 字节 */
     private byte[] jpeg;
+
+    /** 一次 FFmpeg 连接的标识。 */
+    private String streamId;
+
+    public InferFrame(long frameId, Long cameraId, Long vehicleId, Long driverId, long capturedAt, byte[] jpeg) {
+        this(frameId, cameraId, vehicleId, driverId, capturedAt, jpeg, null);
+    }
 }

@@ -6,10 +6,11 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import service.alert.rule.AlertRuleEngine;
+import service.alert.sms.SmsChannelProperties;
 
 @Slf4j
 @Configuration
-@EnableConfigurationProperties(AlertProperties.class)
+@EnableConfigurationProperties({AlertProperties.class, SmsChannelProperties.class})
 public class AlertConfiguration {
     @Bean
     public AlertRuleEngine alertRuleEngine(AlertProperties properties) {

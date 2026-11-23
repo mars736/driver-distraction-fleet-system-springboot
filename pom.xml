@@ -22,6 +22,12 @@
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>com.aliyun</groupId>
+            <artifactId>dysmsapi20170525</artifactId>
+            <version>4.6.0</version>
+        </dependency>
+
         <!-- Web：REST 接口 + WebSocket 实时推送 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

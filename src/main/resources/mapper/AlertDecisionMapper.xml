@@ -34,10 +34,14 @@
          #{maxP}, #{recordType}, #{eventCount}, #{smsStatus}, #{keyFramePath})
     </insert>
     <select id="pendingSms" resultType="entity.AlertRecord">
-        SELECT * FROM alert_record WHERE recognition_id = #{recognitionId} AND sms_status = 'PENDING' FOR UPDATE
+        SELECT a.* FROM alert_record a
+        WHERE a.recognition_id = #{recognitionId} AND a.sms_status = 'PENDING'
+          AND NOT EXISTS (SELECT 1 FROM sms_delivery d WHERE d.alert_id = a.id)
+        FOR UPDATE
     </select>
     <update id="claimSms">
-        UPDATE alert_record SET sms_status = 'SENDING' WHERE id = #{id} AND sms_status = 'PENDING'
+        UPDATE alert_record a SET sms_status = 'SENDING' WHERE a.id = #{id} AND a.sms_status = 'PENDING'
+          AND NOT EXISTS (SELECT 1 FROM sms_delivery d WHERE d.alert_id = a.id)
     </update>
     <update id="updateSmsStatus">
         UPDATE alert_record SET sms_status = #{status} WHERE id = #{id} AND sms_status = 'SENDING'

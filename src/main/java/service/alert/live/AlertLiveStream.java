@@ -88,6 +88,17 @@ public class AlertLiveStream {
 
     @TransactionalEventListener
     public void committed(AlertCreatedEvent event) {
+        broadcast(new LiveEvent("alert", Long.toString(event.id()), event, event.driverId()));
+    }
+
+    @TransactionalEventListener
+    public void committed(VehicleOfflineEvent event) {
+        broadcast(new LiveEvent("vehicle-offline", null, event, null));
+    }
+
+    private record LiveEvent(String name, String id, Object data, Long driverId) { }
+
+    private void broadcast(LiveEvent event) {
         List<Connection> current;
         synchronized (connections) { current = new ArrayList<>(connections); }
         // 在提交回调里只放入有界队列，网络慢不会卡住告警判定线程。
@@ -112,7 +123,7 @@ public class AlertLiveStream {
         private final int tokenVersion;
         private final Instant deadline;
         private final SseEmitter emitter = new SseEmitter(LEASE.toMillis());
-        private final ArrayBlockingQueue<AlertCreatedEvent> pending = new ArrayBlockingQueue<>(MAX_PENDING);
+        private final ArrayBlockingQueue<LiveEvent> pending = new ArrayBlockingQueue<>(MAX_PENDING);
         private final Thread worker;
         private volatile boolean stopped;
         private boolean started;
@@ -137,7 +148,7 @@ public class AlertLiveStream {
             finish();
         }
 
-        private boolean canSee(AlertCreatedEvent event) {
+        private boolean canSee(LiveEvent event) {
             return !stopped && (CommonConstant.ROLE_PLATFORM_ADMIN.equals(role)
                     || Objects.equals(event.driverId(), userId));
         }
@@ -162,7 +173,9 @@ public class AlertLiveStream {
                     if (event == null) {
                         emitter.send(SseEmitter.event().comment("keepalive"));
                     } else {
-                        emitter.send(SseEmitter.event().name("alert").id(Long.toString(event.id())).data(event));
+                        var message = SseEmitter.event().name(event.name()).data(event.data());
+                        if (event.id() != null) { message.id(event.id()); }
+                        emitter.send(message);
                     }
                 }
             } catch (InterruptedException ignored) {
