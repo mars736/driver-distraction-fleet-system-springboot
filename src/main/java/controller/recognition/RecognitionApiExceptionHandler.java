@@ -1,6 +1,8 @@
 package controller.recognition;
 
 import common.exception.BusinessException;
+import controller.report.ReportJobController;
+import controller.telemetry.VehicleTrackController;
 import common.response.Result;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
@@ -11,7 +13,8 @@ import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 /** 仅作用于新增查询模块，沿用框架状态码，不改变现有档案接口的异常约定。 */
-@RestControllerAdvice(assignableTypes = RecognitionQueryController.class)
+@RestControllerAdvice(assignableTypes = {RecognitionQueryController.class, RecognitionDeletionController.class,
+        ReportJobController.class, VehicleTrackController.class})
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @Slf4j
 public class RecognitionApiExceptionHandler extends ResponseEntityExceptionHandler {
@@ -31,8 +34,8 @@ public class RecognitionApiExceptionHandler extends ResponseEntityExceptionHandl
     }
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Object> unexpected(Exception exception) {
-        log.error("识别记录查询失败，异常类型={}", exception.getClass().getSimpleName());
-        return json(500, new HttpHeaders(), "识别记录查询失败，请稍后重试");
+        log.error("数据操作失败，异常类型={}", exception.getClass().getSimpleName());
+        return json(500, new HttpHeaders(), "数据操作失败，请稍后重试");
     }
     private ResponseEntity<Object> json(int status, HttpHeaders headers, String message) {
         // 即使前端下载图片时只接受 image/jpeg，错误正文仍明确返回 JSON。

@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS report_job (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    owner_id BIGINT NOT NULL,
+    report_type VARCHAR(24) NOT NULL,
+    format VARCHAR(8) NOT NULL,
+    filters_json JSON NOT NULL,
+    status VARCHAR(12) NOT NULL DEFAULT 'PENDING',
+    created_at DATETIME(3) NOT NULL,
+    started_at DATETIME(3) NULL,
+    finished_at DATETIME(3) NULL,
+    expires_at DATETIME(3) NULL,
+    run_token CHAR(36) NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    row_count INT NULL,
+    error_message VARCHAR(200) NULL,
+    KEY idx_report_owner (owner_id, id),
+    KEY idx_report_status (status, id),
+    KEY idx_report_expiry (status, expires_at),
+    UNIQUE KEY uk_report_run_token (run_token)
+) COMMENT '异步报表与导出历史';

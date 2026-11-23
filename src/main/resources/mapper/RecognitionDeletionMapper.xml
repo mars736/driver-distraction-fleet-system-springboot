@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.RecognitionDeletionMapper">
+    <select id="isReferenced" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM alert_record WHERE recognition_id = #{id})
+            OR EXISTS(SELECT 1 FROM alert_appeal WHERE target_type = 'RECOGNITION' AND target_id = #{id})
+    </select>
+    <delete id="delete">
+        DELETE FROM recognition_record WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </delete>
+    <insert id="enqueue">
+        INSERT INTO recognition_file_cleanup (path) VALUES (#{path})
+        ON DUPLICATE KEY UPDATE next_run_at = CURRENT_TIMESTAMP(3)
+    </insert>
+    <select id="due" resultType="long">
+        SELECT id FROM recognition_file_cleanup WHERE next_run_at &lt;= CURRENT_TIMESTAMP(3)
+        ORDER BY next_run_at, id LIMIT 25
+    </select>
+    <select id="lock" resultType="string">
+        SELECT path FROM recognition_file_cleanup WHERE id = #{id}
+            AND next_run_at &lt;= CURRENT_TIMESTAMP(3)
+        FOR UPDATE SKIP LOCKED
+    </select>
+    <select id="fileIsReferenced" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM recognition_record WHERE key_frame_path = #{path})
+            OR EXISTS(SELECT 1 FROM alert_record WHERE key_frame_path = #{path})
+            OR EXISTS(SELECT 1 FROM alert_timeline_frame WHERE key_frame_path = #{path})
+    </select>
+    <delete id="complete">DELETE FROM recognition_file_cleanup WHERE id = #{id}</delete>
+    <update id="reschedule">
+        UPDATE recognition_file_cleanup
+        SET attempts = attempts + 1,
+            next_run_at = TIMESTAMPADD(SECOND, LEAST(3600, 30 * (attempts + 1)), CURRENT_TIMESTAMP(3))
+        WHERE id = #{id}
+    </update>
+</mapper>

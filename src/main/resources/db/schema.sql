@@ -87,7 +87,8 @@ CREATE TABLE IF NOT EXISTS recognition_record (
     UNIQUE KEY uk_recognition_source (source_key),
     KEY idx_recognition_vehicle_time (vehicle_id, captured_at),
     KEY idx_recognition_driver_time (driver_id, captured_at),
-    KEY idx_recognition_dashboard_time (captured_at)
+    KEY idx_recognition_dashboard_time (captured_at),
+    KEY idx_recognition_key_frame_path (key_frame_path)
 ) COMMENT '识别记录';
 
 CREATE TABLE IF NOT EXISTS alert_record (
@@ -199,7 +200,8 @@ CREATE TABLE IF NOT EXISTS vehicle_telemetry (
     latitude DOUBLE NOT NULL,
     longitude DOUBLE NOT NULL,
     speed_kmh DOUBLE NULL COMMENT '设备未取得有效速度时为空',
-    PRIMARY KEY (vehicle_id, driver_id, sampled_at)
+    PRIMARY KEY (vehicle_id, driver_id, sampled_at),
+    KEY idx_vehicle_telemetry_track (vehicle_id, sampled_at, driver_id)
 ) COMMENT '司机 App 车辆定位与速度样本';
 
 CREATE TABLE IF NOT EXISTS vehicle_offline_notice (
@@ -238,3 +240,33 @@ CREATE TABLE IF NOT EXISTS sms_delivery (
     KEY idx_sms_delivery_next_check (next_check_at, alert_id),
     CONSTRAINT fk_sms_delivery_alert FOREIGN KEY (alert_id) REFERENCES alert_record(id) ON DELETE CASCADE
 ) COMMENT '真实短信派发与回执';
+
+CREATE TABLE IF NOT EXISTS recognition_file_cleanup (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    path VARCHAR(255) NOT NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    next_run_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    UNIQUE KEY uk_recognition_cleanup_path (path),
+    KEY idx_recognition_cleanup_due (next_run_at, id)
+) COMMENT '识别记录删除后的关键帧清理任务';
+
+CREATE TABLE IF NOT EXISTS report_job (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    owner_id BIGINT NOT NULL,
+    report_type VARCHAR(24) NOT NULL,
+    format VARCHAR(8) NOT NULL,
+    filters_json JSON NOT NULL,
+    status VARCHAR(12) NOT NULL DEFAULT 'PENDING',
+    created_at DATETIME(3) NOT NULL,
+    started_at DATETIME(3) NULL,
+    finished_at DATETIME(3) NULL,
+    expires_at DATETIME(3) NULL,
+    run_token CHAR(36) NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    row_count INT NULL,
+    error_message VARCHAR(200) NULL,
+    KEY idx_report_owner (owner_id, id),
+    KEY idx_report_status (status, id),
+    KEY idx_report_expiry (status, expires_at),
+    UNIQUE KEY uk_report_run_token (run_token)
+) COMMENT '异步报表与导出历史';
