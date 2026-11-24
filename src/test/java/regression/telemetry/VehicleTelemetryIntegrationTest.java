@@ -22,7 +22,9 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -109,6 +111,63 @@ class VehicleTelemetryIntegrationTest {
         report(driver, sampledAt + 60_000, "1").andExpect(status().isBadRequest());
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM vehicle_telemetry WHERE vehicle_id = ?",
                 Integer.class, vehicle)).isZero();
+    }
+
+    @Test
+    void driverCanReadOnlyTheCurrentlyBoundVehicle() throws Exception {
+        String plate = UUID.randomUUID().toString().substring(0, 12);
+        jdbc.update("INSERT INTO vehicle(fleet_id, plate_no) VALUES (?,?)", fleet, plate);
+        long next = jdbc.queryForObject("SELECT id FROM vehicle WHERE plate_no=?", Long.class, plate);
+        String bearer = "Bearer " + jwt.generateToken(driver, 0);
+        String unbound = "Bearer " + jwt.generateToken(otherDriver, 0);
+        long admin = jdbc.queryForObject("SELECT id FROM sys_user WHERE username='admin'", Long.class);
+        String adminBearer = "Bearer " + jwt.generateToken(admin, 0);
+        try {
+            mvc.perform(get("/api/vehicles/{id}", vehicle).header("Authorization", bearer))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.id").value(vehicle));
+            mvc.perform(head("/api/vehicles/{id}", vehicle).header("Authorization", bearer))
+                    .andExpect(status().isOk());
+            mvc.perform(get("/api/vehicles/{id}", next).header("Authorization", bearer))
+                    .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value(404))
+                    .andExpect(jsonPath("$.data").isEmpty());
+            mvc.perform(head("/api/vehicles/{id}", next).header("Authorization", bearer))
+                    .andExpect(status().isNotFound());
+            mvc.perform(get("/api/vehicles/{id}", vehicle).header("Authorization", unbound))
+                    .andExpect(status().isNotFound());
+            mvc.perform(get("/api/vehicles/{id}", Long.MAX_VALUE).header("Authorization", bearer))
+                    .andExpect(status().isNotFound()).andExpect(jsonPath("$.message").value("车辆不存在"));
+            mvc.perform(get("/api/vehicles/{id}", next).header("Authorization", adminBearer))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.id").value(next));
+
+            jdbc.update("UPDATE sys_user SET vehicle_id=? WHERE id=?", next, driver);
+            mvc.perform(get("/api/vehicles/{id}", vehicle).header("Authorization", bearer))
+                    .andExpect(status().isNotFound());
+            mvc.perform(get("/api/vehicles/{id}", next).header("Authorization", bearer))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.id").value(next));
+            jdbc.update("UPDATE vehicle SET fleet_id=? WHERE id=?", Long.MAX_VALUE, next);
+            mvc.perform(get("/api/vehicles/{id}", next).header("Authorization", bearer))
+                    .andExpect(status().isNotFound());
+        } finally {
+            jdbc.update("UPDATE sys_user SET vehicle_id=? WHERE id=?", vehicle, driver);
+            jdbc.update("DELETE FROM vehicle WHERE id=?", next);
+        }
+    }
+
+    @Test
+    void vehicleListAndManagementRoutesStayAdministratorOnly() throws Exception {
+        String bearer = "Bearer " + jwt.generateToken(driver, 0);
+        long admin = jdbc.queryForObject("SELECT id FROM sys_user WHERE username='admin'", Long.class);
+        mvc.perform(get("/api/vehicles/{id}", vehicle)).andExpect(status().isUnauthorized());
+        for (String path : new String[]{"/api/vehicles", "/api/vehicles/live-status", "/api/vehicles/" + vehicle + "/track"}) {
+            mvc.perform(get(path).header("Authorization", bearer)).andExpect(status().isForbidden());
+            mvc.perform(head(path).header("Authorization", bearer)).andExpect(status().isForbidden());
+        }
+        mvc.perform(put("/api/vehicles/{id}", vehicle).header("Authorization", bearer)
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/vehicles").param("fleetId", String.valueOf(fleet))
+                        .header("Authorization", "Bearer " + jwt.generateToken(admin, 0)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(1));
     }
 
     @Test

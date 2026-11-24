@@ -20,6 +20,7 @@ public interface VehicleMapper {
     long count(@Param("fleetId") Long fleetId);
 
     Vehicle selectById(Long id);
+    Vehicle selectBoundToDriver(@Param("id") long id, @Param("driverId") long driverId);
 
     int insert(Vehicle vehicle);
 

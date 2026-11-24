@@ -1,10 +1,12 @@
 package controller.vehicle;
 
+import common.exception.BusinessException;
 import common.response.PageResult;
 import common.response.Result;
 import entity.Vehicle;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import service.vehicle.VehicleService;
 
@@ -26,8 +28,13 @@ public class VehicleController {
     }
 
     @GetMapping("/{id}")
-    public Result<Vehicle> get(@PathVariable Long id) {
-        return Result.success(vehicleService.getById(id));
+    public ResponseEntity<Result<Vehicle>> get(@PathVariable long id) {
+        try {
+            return ResponseEntity.ok(Result.success(vehicleService.getReadableById(id)));
+        } catch (BusinessException exception) {
+            return ResponseEntity.status(exception.getCode())
+                    .body(Result.error(exception.getCode(), exception.getMessage()));
+        }
     }
 
     @PostMapping

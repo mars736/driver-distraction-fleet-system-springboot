@@ -46,6 +46,8 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 
 司机用 `POST /api/vehicle-telemetry` 上报绑定车辆的定位和速度。后端在识别帧的采集时间查找该司机的近期样本，详情见 [定位上报与联调](docs/vehicle-telemetry.md)。
 
+司机 App 可用 `GET /api/vehicles/{id}` 读取本人当前绑定的车辆，未绑定、他人车辆或车辆不存在均返回 HTTP 404。车辆列表、轨迹、实时状态与写操作仍由管理员使用。
+
 告警规则、边界处理、配置、数据库集成测试及假推理服务使用方法见 [告警判定说明](docs/alert-decision.md)。
 
 告警查询提供 `GET /api/alerts`、`GET /api/alerts/{id}` 和 `GET /api/alerts/{id}/key-frame`，支持组合筛选和分页。管理员可查询全部记录，司机仅可查询本人记录及图片。参数、返回字段和前端图片读取方式见 [告警查询说明](docs/alert-query.md)。两次 PR 的审阅及修复记录见 [PR 审阅记录](docs/pr-review.md)。
