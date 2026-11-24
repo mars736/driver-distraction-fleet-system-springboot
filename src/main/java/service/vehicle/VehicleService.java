@@ -1,7 +1,9 @@
 package service.vehicle;
 
+import common.constant.CommonConstant;
 import common.exception.BusinessException;
 import common.response.PageResult;
+import common.security.UserContext;
 import entity.Vehicle;
 import lombok.RequiredArgsConstructor;
 import service.audit.OperationAction;
@@ -41,6 +43,18 @@ public class VehicleService {
         if (vehicle == null) {
             throw new BusinessException(404, "车辆不存在");
         }
+        return vehicle;
+    }
+
+    public Vehicle getReadableById(long id) {
+        var actor = UserContext.get();
+        if (CommonConstant.ROLE_PLATFORM_ADMIN.equals(actor.role())) { return getById(id); }
+        if (!CommonConstant.ROLE_DRIVER.equals(actor.role()) || actor.userId() == null) {
+            throw new BusinessException(403, "无权限查询车辆");
+        }
+        // 一条查询同时验证当前绑定和查详情，换绑后无需重新登录。
+        Vehicle vehicle = vehicleMapper.selectBoundToDriver(id, actor.userId());
+        if (vehicle == null) { throw new BusinessException(404, "车辆不存在"); }
         return vehicle;
     }
 

@@ -29,6 +29,12 @@
         SELECT * FROM vehicle WHERE id = #{id}
     </select>
 
+    <select id="selectBoundToDriver" resultType="entity.Vehicle">
+        SELECT v.* FROM vehicle v
+        JOIN sys_user u ON u.id = #{driverId} AND u.vehicle_id = v.id AND u.fleet_id = v.fleet_id
+        WHERE v.id = #{id} AND u.role = 'DRIVER' AND u.enabled = 1
+    </select>
+
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO vehicle (fleet_id, plate_no, vin, vehicle_type, rated_tonnage, purchase_date, monitor_enabled, remark)
         VALUES (#{fleetId}, #{plateNo}, #{vin}, #{vehicleType}, #{ratedTonnage}, #{purchaseDate}, #{monitorEnabled}, #{remark})
