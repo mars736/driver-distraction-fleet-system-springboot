@@ -75,7 +75,10 @@ public class SecurityConfig {
                         "/api/auth/fleets"
                 ).permitAll()
                 .requestMatchers("/api/auth/users/**").hasRole("PLATFORM_ADMIN")//「禁用/启用账号」这个接口只有平台管理员能调。
-                .requestMatchers("/api/fleets/**", "/api/vehicles/**", "/api/drivers/**").hasRole("PLATFORM_ADMIN")//三个档案接口只有平台管理员能管。
+                .requestMatchers("/api/fleets/**", "/api/drivers/**").hasRole("PLATFORM_ADMIN")//车队和司机档案接口只有平台管理员能管。
+                .requestMatchers(HttpMethod.GET, "/api/vehicles", "/api/vehicles/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")//司机可以读取自己的车辆信息。
+                .requestMatchers(HttpMethod.HEAD, "/api/vehicles", "/api/vehicles/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
+                .requestMatchers("/api/vehicles", "/api/vehicles/**").hasRole("PLATFORM_ADMIN")//车辆档案写操作（增删改）仍仅限平台管理员。
                 .requestMatchers("/api/operation-logs", "/api/operation-logs/**").hasRole("PLATFORM_ADMIN")
                 .requestMatchers("/api/report-jobs", "/api/report-jobs/**").hasRole("PLATFORM_ADMIN")
                 .requestMatchers("/api/operations/workforce", "/api/operations/workforce/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
