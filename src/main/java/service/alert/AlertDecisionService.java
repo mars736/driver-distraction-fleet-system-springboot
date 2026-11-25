@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import service.alert.rule.AlertKind;
 import service.alert.rule.AlertRuleEngine;
+import service.alert.rule.RecognitionDecisionReason;
 import service.alert.rule.VehicleAlertState;
 import service.alert.live.AlertCreatedEvent;
 import service.alert.sms.SmsChannelProperties;
@@ -88,7 +89,7 @@ public class AlertDecisionService {
             events.publishEvent(AlertCreatedEvent.from(alert));
             if (violation) { timelineAlerts.add(alert.getId()); }
         }
-        if (!"OUT_OF_ORDER".equals(evaluation.reason())) {
+        if (evaluation.reason() != RecognitionDecisionReason.OUT_OF_ORDER) {
             evaluation.state().setStreamId(input.streamId());
             timelineCapture.capture(input, recognition.getCapturedAt(), timelineAlerts, broken);
         }
@@ -117,7 +118,7 @@ public class AlertDecisionService {
         record.setOod(input.ood());
         record.setParticipated(evaluation.participated());
         record.setDecisionReason(vehicle == null && input.vehicleId() != null
-                ? "VEHICLE_NOT_FOUND" : evaluation.reason());
+                ? RecognitionDecisionReason.VEHICLE_NOT_FOUND.name() : evaluation.reason().name());
         record.setSpeedKmh(AlertRuleEngine.isKnownSpeed(speed) ? speed : null);
         record.setSpeedStatus(AlertRuleEngine.isKnownSpeed(speed) ? "KNOWN" : "UNKNOWN");
         record.setKeyFramePath(keyFrame);

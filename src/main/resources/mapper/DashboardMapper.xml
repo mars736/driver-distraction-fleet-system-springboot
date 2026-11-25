@@ -29,7 +29,8 @@
     </select>
 
     <select id="alertCounts" resultType="vo.dashboard.DashboardView$Alerts">
-        SELECT COUNT(CASE WHEN record_type IN ('SMS_ALERT', 'BACKLOG') AND status IN ('OPEN','CONFIRMED') THEN 1 END) AS active_violation_count,
+        SELECT COUNT(CASE WHEN record_type = 'SMS_ALERT' AND status IN ('OPEN','CONFIRMED') THEN 1 END) AS sms_alert_count,
+               COUNT(CASE WHEN record_type = 'BACKLOG' AND status IN ('OPEN','CONFIRMED') THEN 1 END) AS backlog_count,
                COUNT(CASE WHEN record_type = 'SPEED_UNKNOWN' THEN 1 END) AS speed_unknown_count,
                COUNT(CASE WHEN record_type IN ('SMS_ALERT', 'BACKLOG') AND status = 'REVOKED' THEN 1 END) AS revoked_violation_count
         FROM alert_record

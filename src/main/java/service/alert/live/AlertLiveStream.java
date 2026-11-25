@@ -36,12 +36,32 @@ public class AlertLiveStream {
 
     private final JwtUtil jwt;
     private final UserMapper users;
+    private final AlertStreamTickets tickets = new AlertStreamTickets();
     private final Set<Connection> connections = new HashSet<>();
     private boolean closed;
 
     public record Subscription(SseEmitter emitter, Runnable start, Runnable stop) { }
 
+    public record StreamTicket(String ticket, Instant expiresAt) { }
+
+    public StreamTicket issueTicket(String authorization) {
+        var issued = tickets.issue(bearerIdentity(authorization), Instant.now());
+        return new StreamTicket(issued.value(), issued.expiresAt());
+    }
+
     public Subscription open(String authorization) {
+        return open(bearerIdentity(authorization));
+    }
+
+    public Subscription openWithTicket(String ticket) {
+        var identity = tickets.consume(ticket, Instant.now());
+        if (!isAccountCurrent(identity.userId(), identity.role(), identity.tokenVersion())) {
+            throw new BusinessException(401, "登录已失效");
+        }
+        return open(identity);
+    }
+
+    private AlertStreamTickets.Identity bearerIdentity(String authorization) {
         var user = UserContext.get();
         String role = user.role();
         if (user.userId() == null || !(CommonConstant.ROLE_PLATFORM_ADMIN.equals(role)
@@ -52,8 +72,6 @@ public class AlertLiveStream {
             throw new BusinessException(401, "未登录或登录已失效");
         }
 
-        int version;
-        Instant expires;
         try {
             var claims = jwt.parseToken(authorization.substring(7));
             Integer tokenVersion = claims.get("tokenVersion", Integer.class);
@@ -61,17 +79,20 @@ public class AlertLiveStream {
                     || !user.userId().toString().equals(claims.getSubject())) {
                 throw new BusinessException(401, "未登录或登录已失效");
             }
-            version = tokenVersion;
-            expires = claims.getExpiration().toInstant();
+            return new AlertStreamTickets.Identity(user.userId(), role, tokenVersion, claims.getExpiration().toInstant());
         } catch (JwtException | IllegalArgumentException e) {
             throw new BusinessException(401, "未登录或登录已失效");
         }
+    }
 
-        Instant limit = Instant.now().plus(LEASE);
+    private Subscription open(AlertStreamTickets.Identity identity) {
+        Instant now = Instant.now();
+        Instant limit = now.plus(LEASE);
+        Instant expires = identity.tokenExpiresAt();
         Instant deadline = expires.isBefore(limit) ? expires : limit;
-        if (!Instant.now().isBefore(deadline)) { throw new BusinessException(401, "登录已失效"); }
+        if (!now.isBefore(deadline)) { throw new BusinessException(401, "登录已失效"); }
 
-        var connection = new Connection(user.userId(), role, version, deadline);
+        var connection = new Connection(identity.userId(), identity.role(), identity.tokenVersion(), deadline);
         connection.emitter.onCompletion(connection::stop);
         connection.emitter.onTimeout(connection::stop);
         connection.emitter.onError(error -> connection.stop());
@@ -99,6 +120,12 @@ public class AlertLiveStream {
     @TransactionalEventListener
     public void committed(OperationsReminderEvent event) {
         broadcast(new LiveEvent("operations-reminder", null, event, null));
+    }
+
+    private boolean isAccountCurrent(long userId, String role, int tokenVersion) {
+        var account = users.selectById(userId);
+        return account != null && Boolean.TRUE.equals(account.getEnabled()) && role.equals(account.getRole())
+                && Objects.equals(tokenVersion, account.getTokenVersion());
     }
 
     private record LiveEvent(String name, String id, Object data, Long driverId) { }
@@ -160,10 +187,7 @@ public class AlertLiveStream {
 
         private boolean authorized() {
             if (stopped || !Instant.now().isBefore(deadline)) { return false; }
-            var account = users.selectById(userId);
-            return account != null && Boolean.TRUE.equals(account.getEnabled()) && role.equals(account.getRole())
-                    && Objects.equals(tokenVersion, account.getTokenVersion()) && !stopped
-                    && Instant.now().isBefore(deadline);
+            return isAccountCurrent(userId, role, tokenVersion) && !stopped && Instant.now().isBefore(deadline);
         }
 
         private void sendEvents() {

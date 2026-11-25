@@ -27,7 +27,7 @@ public class AlertRuleEngine {
     public record Observation(Long vehicleId, Long driverId, long capturedAt, int pred,
                               boolean ood, Double speedKmh, boolean continuityBroken) { }
 
-    public record Evaluation(VehicleAlertState state, boolean participated, String reason,
+    public record Evaluation(VehicleAlertState state, boolean participated, RecognitionDecisionReason reason,
                              List<AlertKind> alerts) {
         public Evaluation { alerts = List.copyOf(alerts); }
 
@@ -39,10 +39,10 @@ public class AlertRuleEngine {
     public Evaluation evaluate(VehicleAlertState previous, Observation frame) {
         VehicleAlertState state = new VehicleAlertState(previous);
         if (frame.vehicleId() == null) {
-            return new Evaluation(state, false, "MISSING_VEHICLE", List.of());
+            return new Evaluation(state, false, RecognitionDecisionReason.MISSING_VEHICLE, List.of());
         }
         if (frame.capturedAt() < state.getLastCapturedAt()) {
-            return new Evaluation(state, false, "OUT_OF_ORDER", List.of());
+            return new Evaluation(state, false, RecognitionDecisionReason.OUT_OF_ORDER, List.of());
         }
         long hour = Instant.ofEpochMilli(frame.capturedAt()).atZone(ZONE)
                 .truncatedTo(ChronoUnit.HOURS).toInstant().toEpochMilli();
@@ -65,15 +65,15 @@ public class AlertRuleEngine {
         state.setSpeedUnknown(!speedKnown);
         if (speedKnown && frame.speedKmh() <= silentSpeedKmh) {
             state.resetContinuity();
-            return new Evaluation(state, false, "LOW_SPEED", alerts);
+            return new Evaluation(state, false, RecognitionDecisionReason.LOW_SPEED, alerts);
         }
         // OOD 只跳过，不清零有效帧序列。
         if (frame.ood()) {
-            return new Evaluation(state, false, "OOD", alerts);
+            return new Evaluation(state, false, RecognitionDecisionReason.OOD, alerts);
         }
         if (frame.pred() < 0 || frame.pred() > 9) {
             state.resetContinuity();
-            return new Evaluation(state, false, "INVALID_PREDICTION", alerts);
+            return new Evaluation(state, false, RecognitionDecisionReason.INVALID_PREDICTION, alerts);
         }
         if (frame.pred() == 0) {
             state.resetContinuity();
@@ -99,7 +99,7 @@ public class AlertRuleEngine {
                 }
             }
         }
-        return new Evaluation(state, true, "EVALUATED", alerts);
+        return new Evaluation(state, true, RecognitionDecisionReason.EVALUATED, alerts);
     }
 
     public static boolean isKnownSpeed(Double speed) {

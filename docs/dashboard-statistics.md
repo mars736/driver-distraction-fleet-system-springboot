@@ -12,7 +12,8 @@
 
 - `recognitions` 按识别帧统计，`normalFrames` 为 c0，`distractedFrames` 为 c1–c9，另计 `oodFrames` 和 `unclassifiedFrames`。分心帧数包含识别出了类别但未参与告警判定的帧。
 - `recognitions.oodRate` = OOD 帧数 / 总帧数。`behaviors` 中的 `share` = 该类别帧数 / 有效分心帧数。比例为 0–1 的小数，保留最多四位精度，空统计返回 0 和空数组。
-- `alerts.activeViolationCount` 只统计 OPEN 或 CONFIRMED 的 SMS_ALERT、BACKLOG。速度未知和已撤销的行为告警分别返回为 `speedUnknownCount` 与 `revokedViolationCount`。
+- `alerts.smsAlertCount`、`alerts.backlogCount` 分别统计 OPEN 或 CONFIRMED 的 SMS_ALERT、BACKLOG，二者之和等于 `activeViolationCount`。工作台按范围内全部记录聚合，列表分页不影响计数。短信类告警计数仅按告警类型统计。
+- 速度未知和已撤销的行为告警分别返回为 `speedUnknownCount` 与 `revokedViolationCount`。
 - `currentHourDistractionEvents` 读取告警引擎当前整点小时的其他分心事件累计。例如 14:30 返回 14:00 开始的累计，跨小时后旧计数视为 0。该计数与分心帧数不同。
 
 未登录返回 401，角色无权访问返回 403，非法 ID（包括显式传空的 `fleetId`）返回 400，车队或车辆不存在返回 404。省略 `fleetId` 查询全部车队。
