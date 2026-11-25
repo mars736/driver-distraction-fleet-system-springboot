@@ -123,7 +123,7 @@ public class DriverService {
     }
 
     private void checkFleetExists(Long fleetId) {
-        if (fleetId == null || fleetMapper.selectById(fleetId) == null) {
+        if (fleetId == null || fleetMapper.lockById(fleetId) == null) {
             throw new BusinessException("所属车队不存在");
         }
     }

@@ -28,6 +28,7 @@ public interface FleetMapper {
     long count(@Param("keyword") String keyword);
 
     Fleet selectById(Long id);
+    Fleet lockById(Long id);
 
     int insert(Fleet fleet);
 

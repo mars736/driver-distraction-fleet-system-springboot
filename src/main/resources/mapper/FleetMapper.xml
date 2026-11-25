@@ -40,6 +40,10 @@
         SELECT * FROM fleet WHERE id = #{id}
     </select>
 
+    <select id="lockById" resultType="entity.Fleet">
+        SELECT * FROM fleet WHERE id = #{id} FOR UPDATE
+    </select>
+
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO fleet (fleet_no, name, manager, phone, established_date, remark, enabled)
         VALUES (#{fleetNo}, #{name}, #{manager}, #{phone}, #{establishedDate}, #{remark}, #{enabled})

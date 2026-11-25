@@ -56,7 +56,7 @@ public class AuthService {
     /** 司机注册：工号全局唯一，注册成功默认可用 */
     @Transactional
     public void register(RegisterRequest req) {
-        Fleet fleet = fleetMapper.selectById(req.getFleetId());
+        Fleet fleet = fleetMapper.lockById(req.getFleetId());
         if (fleet == null || !Boolean.TRUE.equals(fleet.getEnabled())) {
             throw new BusinessException("所选车队不存在或已停用");
         }
