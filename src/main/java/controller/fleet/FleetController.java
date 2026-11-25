@@ -5,7 +5,9 @@ import common.response.Result;
 import entity.Fleet;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import service.fleet.FleetInUseException;
 import service.fleet.FleetService;
 
 /**
@@ -45,6 +47,12 @@ public class FleetController {
     public Result<Void> updateEnabled(@PathVariable Long id, @RequestParam Boolean enabled) {
         fleetService.updateEnabled(id, enabled);
         return Result.success();
+    }
+
+    @ExceptionHandler(FleetInUseException.class)
+    public ResponseEntity<Result<Void>> fleetInUse(FleetInUseException exception) {
+        return ResponseEntity.status(exception.getCode())
+                .body(Result.error(exception.getCode(), exception.getMessage()));
     }
 
     @DeleteMapping("/{id}")

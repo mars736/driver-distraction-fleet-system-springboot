@@ -8,7 +8,10 @@ import service.audit.OperationAction;
 import service.audit.OperationLogService;
 import lombok.extern.slf4j.Slf4j;
 import mapper.FleetMapper;
+import mapper.UserMapper;
+import mapper.VehicleMapper;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -22,6 +25,8 @@ import java.util.List;
 public class FleetService {
 
     private final FleetMapper fleetMapper;
+    private final UserMapper userMapper;
+    private final VehicleMapper vehicleMapper;
     private final OperationLogService audit;
 
     public PageResult<Fleet> list(String keyword, Integer page, Integer pageSize) {
@@ -58,27 +63,39 @@ public class FleetService {
 
     @Transactional
     public Fleet update(Fleet fleet) {
-        getById(fleet.getId());
+        lockExistingFleet(fleet.getId());
         if (fleetMapper.countByFleetNo(fleet.getFleetNo(), fleet.getId()) > 0) {
             throw new BusinessException("车队编号已存在");
         }
         fleetMapper.update(fleet);
         audit.success(OperationAction.FLEET_UPDATE, fleet.getId(), fleet.getId());
-        return fleet;
+        return getById(fleet.getId());
     }
 
     @Transactional
     public void updateEnabled(Long id, Boolean enabled) {
-        getById(id);
+        lockExistingFleet(id);
         fleetMapper.updateEnabled(id, enabled);
         audit.success(OperationAction.FLEET_ENABLED, id, id, Boolean.TRUE.equals(enabled) ? "ENABLED" : "DISABLED");
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void delete(Long id) {
-        getById(id);
+        // 注册和档案归属写入也先锁同一车队，引用检查完成前无法新增关联。
+        lockExistingFleet(id);
+        int vehicleCount = vehicleMapper.countByFleetId(id);
+        long driverCount = userMapper.countDrivers(id, null);
+        if (vehicleCount > 0 || driverCount > 0) {
+            throw new FleetInUseException(vehicleCount, driverCount);
+        }
         fleetMapper.deleteById(id);
         audit.success(OperationAction.FLEET_DELETE, id, id);
         log.info("删除车队 id={}", id);
+    }
+
+    private void lockExistingFleet(Long id) {
+        if (fleetMapper.lockById(id) == null) {
+            throw new BusinessException(404, "车队不存在");
+        }
     }
 }
