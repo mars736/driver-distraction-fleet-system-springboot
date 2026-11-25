@@ -30,6 +30,10 @@ public interface UserMapper {
                       @Param("enabled") boolean enabled,
                       @Param("tokenVersion") Integer tokenVersion);
 
+    int countEnabledAdmins();
+
+    int bumpTokenVersion(@Param("id") Long id, @Param("tokenVersion") Integer tokenVersion);
+
     // ===== 司机档案 =====
 
     List<User> listDrivers(@Param("fleetId") Long fleetId,

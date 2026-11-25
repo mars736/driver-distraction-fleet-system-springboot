@@ -96,4 +96,12 @@
         DELETE FROM sys_user WHERE id = #{id}
     </delete>
 
+    <select id="countEnabledAdmins" resultType="int">
+        SELECT COUNT(*) FROM sys_user WHERE role = 'PLATFORM_ADMIN' AND enabled = 1
+    </select>
+
+    <update id="bumpTokenVersion">
+        UPDATE sys_user SET token_version = #{tokenVersion} WHERE id = #{id}
+    </update>
+
 </mapper>

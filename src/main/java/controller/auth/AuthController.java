@@ -70,12 +70,11 @@ public class AuthController {
         return Result.success("登录成功", authService.login(req));
     }
 
-    /**
-     * 退出。JWT 是无状态的，服务端不存会话；
-     * 真正“退出”由前端删除本地 token，这里只是给个统一入口。
-     */
+    /** 退出：把当前用户 tokenVersion +1，旧 token 立即失效 */
     @PostMapping("/logout")
     public Result<Void> logout() {
+        LoginUser loginUser = UserContext.get();
+        authService.logout(loginUser.userId());
         return Result.success("已退出", null);
     }
 
@@ -103,7 +102,8 @@ public class AuthController {
     /** 管理员禁用 / 启用账号 */
     @PutMapping("/users/{id}/enabled")
     public Result<Void> setEnabled(@PathVariable Long id, @RequestParam boolean enabled) {
-        authService.setEnabled(id, enabled);
+        LoginUser loginUser = UserContext.get();
+        authService.setEnabled(id, enabled, loginUser.userId());
         return Result.success();
     }
 }

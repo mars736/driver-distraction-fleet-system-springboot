@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import mapper.UserMapper;
+import org.springframework.dao.DataAccessException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -56,32 +57,44 @@ public class JwtAuthFilter extends OncePerRequestFilter {//OncePerRequestFilter 
         }
 
         String token = header.substring(7);//"Bearer " 正好是 7 个字符（B-e-a-r-e-r-空格），所以 substring(7) 就是把前面这 7 个字符去掉，剩下纯 token 字符串。
+
+        Claims claims;
+        Long userId;
+        Integer tokenVersion;
         try {
-            Claims claims = jwtUtil.parseToken(token);//先拿到载荷，注意这里token被篡改或token格式错误或token载荷里设置的时间超时，都会抛异常
-            Long userId = Long.valueOf(claims.getSubject());//Subject里当初组装jwt的时候装的是userid
-            Integer tokenVersion = claims.get("tokenVersion", Integer.class);
-
-            User user = userMapper.selectById(userId);
-            if (user == null
-                    || !Boolean.TRUE.equals(user.getEnabled())
-                    || !user.getTokenVersion().equals(tokenVersion)) {
-                writeUnauthorized(response, "token 已失效");
-                return;
-            }//这个if在验证拿到的token跟数据库里的user是否一致，看看过期了没
-
-            LoginUser loginUser = new LoginUser(user.getId(), user.getRole(), user.getFleetId());//校验通过了，把数据库里的用户信息装成一个 LoginUser 对象
-            List<GrantedAuthority> authorities =//这是权限对象列表
-                    List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole()));//(new SimpleGrantedAuthority()创建一个权限对象,权限名就是ROLE_ + user.getRole()，比如ROLE_DRIVER。GrantedAuthority是一个接口，里面只有getAuthority()需要重写，SimpleGrantedAuthority就是它的实现类，可以直接get我刚刚设置好的权限名。用List是因为一个角色可能有多个权限，当然这个项目只有一个
-            UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(loginUser, null, authorities);//创建 Spring Security 的「认证对象」，表示「这个人已认证，并拥有这些权限。      一个loginuser为什么权限对象是一个列表：因为一个角色可能有多个权限
-            authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));//往认证对象里附加请求细节（比如来源 IP、session id）。这步不是必须的，属于「顺手补全信息」，后面如果需要记录登录 IP 会用到。
-            SecurityContextHolder.getContext().setAuthentication(authentication);//把认证对象放进当前请求线程的「安全上下文」
-            /*SecurityContextHolder 底层是基于 ThreadLocal 的：同一个请求线程里，任何地方都能读到它；请求结束自动清理，不会串到别人的请求。
-            放进去之后，Controller/Service 里调用 UserContext.get() 就能拿到当前用户了。*/
+            claims = jwtUtil.parseToken(token);//先拿到载荷，注意这里token被篡改或token格式错误或token载荷里设置的时间超时，都会抛异常
+            userId = Long.valueOf(claims.getSubject());//Subject里当初组装jwt的时候装的是userid
+            tokenVersion = claims.get("tokenVersion", Integer.class);
         } catch (Exception e) {
             writeUnauthorized(response, "token 无效或已过期");
             return;
         }
+
+        // 查数据库单独一个 try：数据库挂了返回 500，不能和「token 有问题」混成 401
+        User user;
+        try {
+            user = userMapper.selectById(userId);
+        } catch (DataAccessException e) {
+            securityResponseWriter.write(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "服务暂时不可用，请稍后重试");
+            return;
+        }
+
+        if (user == null
+                || !Boolean.TRUE.equals(user.getEnabled())
+                || !user.getTokenVersion().equals(tokenVersion)) {
+            writeUnauthorized(response, "token 已失效");
+            return;
+        }//这个if在验证拿到的token跟数据库里的user是否一致，看看过期了没
+
+        LoginUser loginUser = new LoginUser(user.getId(), user.getRole(), user.getFleetId());//校验通过了，把数据库里的用户信息装成一个 LoginUser 对象
+        List<GrantedAuthority> authorities =//这是权限对象列表
+                List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole()));//(new SimpleGrantedAuthority()创建一个权限对象,权限名就是ROLE_ + user.getRole()，比如ROLE_DRIVER。GrantedAuthority是一个接口，里面只有getAuthority()需要重写，SimpleGrantedAuthority就是它的实现类，可以直接get我刚刚设置好的权限名。用List是因为一个角色可能有多个权限，当然这个项目只有一个
+        UsernamePasswordAuthenticationToken authentication =
+                new UsernamePasswordAuthenticationToken(loginUser, null, authorities);//创建 Spring Security 的「认证对象」，表示「这个人已认证，并拥有这些权限。      一个loginuser为什么权限对象是一个列表：因为一个角色可能有多个权限
+        authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));//往认证对象里附加请求细节（比如来源 IP、session id）。这步不是必须的，属于「顺手补全信息」，后面如果需要记录登录 IP 会用到。
+        SecurityContextHolder.getContext().setAuthentication(authentication);//把认证对象放进当前请求线程的「安全上下文」
+        /*SecurityContextHolder 底层是基于 ThreadLocal 的：同一个请求线程里，任何地方都能读到它；请求结束自动清理，不会串到别人的请求。
+        放进去之后，Controller/Service 里调用 UserContext.get() 就能拿到当前用户了。*/
 
         chain.doFilter(request, response);
     }

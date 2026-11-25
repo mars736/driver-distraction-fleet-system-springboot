@@ -98,10 +98,8 @@ public class AuthService {
         return new LoginResponse(token, user.getId(), user.getName(), user.getRole(), user.getFleetId());
     }
 
-    /** token 续期：旧 token 仍有效且账号未被禁用时，签发新 token */
-    /*有 refresh：
-        token 快过期 → 前端悄悄调 refresh → 拿到新 token → 继续用
-        → 用户无感知，体验丝滑*/
+    /** token 续期：单设备登录——续期时 tokenVersion +1，旧 token 立即失效，只保留最新 token */
+    @Transactional
     public String refresh(RefreshTokenRequest req) {
         Claims claims;
         try {
@@ -109,14 +107,16 @@ public class AuthService {
         } catch (Exception e) {
             throw new BusinessException(401, "token 格式非法或遭篡改或已过期");
         }
-        Long userId = Long.valueOf(claims.getSubject());// 从 token 中获取用户 ID
+        Long userId = Long.valueOf(claims.getSubject());
         Integer tokenVersion = claims.get("tokenVersion", Integer.class);
         User user = userMapper.selectById(userId);
         if (user == null || !Boolean.TRUE.equals(user.getEnabled())
-                || !user.getTokenVersion().equals(tokenVersion)) {//注意，用户自己改密码或者管理员禁用账号，都会导致数据库里的tokenversion+1
+                || !user.getTokenVersion().equals(tokenVersion)) {
             throw new BusinessException(401, "token 已失效");
         }
-        return jwtUtil.generateToken(user.getId(), user.getTokenVersion());
+        int newVersion = user.getTokenVersion() + 1;
+        userMapper.bumpTokenVersion(userId, newVersion);
+        return jwtUtil.generateToken(userId, newVersion);
     }
 
     /** 修改密码：改完把 tokenVersion +1，旧 token 立即失效 */
@@ -162,12 +162,31 @@ public class AuthService {
 
     /** 管理员禁用 / 启用账号：状态切换时 tokenVersion +1，让旧 token 立即失效 */
     @Transactional
-    public void setEnabled(Long id, boolean enabled) {
+    public void setEnabled(Long id, boolean enabled, Long operatorId) {
         User user = userMapper.selectById(id);
         if (user == null) {
             throw new BusinessException(404, "用户不存在");
         }
+        if (!enabled) {
+            if (id.equals(operatorId)) {
+                throw new BusinessException("不能停用当前登录账号");
+            }
+            if ("PLATFORM_ADMIN".equals(user.getRole()) && userMapper.countEnabledAdmins() <= 1) {
+                throw new BusinessException("不能停用最后一个可用管理员");
+            }
+        }
         userMapper.updateEnabled(id, enabled, user.getTokenVersion() + 1);
         audit.success(OperationAction.AUTH_ENABLED, id, user.getFleetId(), enabled ? "ENABLED" : "DISABLED");
+    }
+
+    /** 退出登录：tokenVersion +1，让该用户所有已签发的 token 立即失效（全局退出） */
+    @Transactional
+    public void logout(Long userId) {
+        User user = userMapper.selectById(userId);//userId:刚刚controller从上下文获取的userId
+        if (user == null) {
+            throw new BusinessException(404, "用户不存在");
+        }
+        userMapper.bumpTokenVersion(userId, user.getTokenVersion() + 1);
+        audit.authSuccess(OperationAction.AUTH_LOGOUT, user);
     }
 }
