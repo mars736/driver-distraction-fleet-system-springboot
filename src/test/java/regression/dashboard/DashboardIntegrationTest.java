@@ -119,6 +119,34 @@ class DashboardIntegrationTest {
     }
 
     @Test
+    void driverAlertCountsAreCompleteBeyondOnePageAndRespectDateAndOwnership() throws Exception {
+        for (int i = 0; i < 120; i++) {
+            alert(frame(fleetA, vehicleA, driverA, day, "c1", false), fleetA, vehicleA, driverA, day,
+                    "SMS_ALERT", "OPEN");
+        }
+        var lastToday = day.plusDays(1).minusNanos(1_000_000);
+        alert(frame(fleetA, vehicleA, driverA, lastToday, "c2", false), fleetA, vehicleA, driverA, lastToday,
+                "BACKLOG", "CONFIRMED");
+        alert(frame(fleetA, vehicleA, driverA, day, "c1", false), fleetA, vehicleA, driverA, day,
+                "SMS_ALERT", "REVOKED");
+        alert(frame(fleetA, vehicleA, driverA, day, "c0", false), fleetA, vehicleA, driverA, day,
+                "SPEED_UNKNOWN", "OPEN");
+        alert(frame(fleetB, vehicleB, driverB, day, "c1", false), fleetB, vehicleB, driverB, day,
+                "SMS_ALERT", "CONFIRMED");
+        var tomorrow = day.plusDays(1);
+        alert(frame(fleetA, vehicleA, driverA, tomorrow, "c2", false), fleetA, vehicleA, driverA, tomorrow,
+                "BACKLOG", "OPEN");
+
+        mvc.perform(get(ROOT + "/me").header("Authorization", driver))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.alerts.smsAlertCount").value(120))
+                .andExpect(jsonPath("$.data.alerts.backlogCount").value(1))
+                .andExpect(jsonPath("$.data.alerts.activeViolationCount").value(121))
+                .andExpect(jsonPath("$.data.alerts.revokedViolationCount").value(1))
+                .andExpect(jsonPath("$.data.alerts.speedUnknownCount").value(1));
+    }
+
+    @Test
     void singleVehicleReadsOnlyItsCountersAndOnlyFromTheCurrentFixedHour() throws Exception {
         frame(fleetA, vehicleA, driverA, day, "c0", false);
         frame(fleetA, vehicleB, driverB, day, "c1", false);

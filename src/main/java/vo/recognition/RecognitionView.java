@@ -2,6 +2,8 @@ package vo.recognition;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
+import service.alert.rule.RecognitionDecisionReason;
+
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -33,4 +35,8 @@ public class RecognitionView {
     private String keyFrameUrl;
     private List<RecognitionAlertView> linkedAlerts = List.of();
     private List<RecognitionAppealView> latestAppeals = List.of();
+
+    public String getDecisionReasonLabel() {
+        return RecognitionDecisionReason.labelFor(decisionReason);
+    }
 }

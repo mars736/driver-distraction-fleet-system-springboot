@@ -2,6 +2,7 @@ package common.config;
 
 import common.security.JwtAuthFilter;
 import common.security.SecurityResponseWriter;
+import controller.alert.AlertLiveController;
 import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -67,7 +68,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 // SSE 初次连接仍需认证，异步收尾转发不会创建新订阅。
                 .requestMatchers(request -> request.getDispatcherType() == DispatcherType.ASYNC
-                        && request.getRequestURI().equals(request.getContextPath() + "/api/alerts/stream")).permitAll()
+                        && request.getRequestURI().equals(request.getContextPath() + AlertLiveController.PATH)).permitAll()
                 .requestMatchers(
                         "/api/auth/login",
                         "/api/auth/register",
@@ -94,6 +95,11 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/appeals", "/api/appeals/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
                 .requestMatchers(HttpMethod.HEAD, "/api/appeals", "/api/appeals/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
                 .requestMatchers("/api/appeals", "/api/appeals/**").denyAll()
+                .requestMatchers(HttpMethod.POST, AlertLiveController.TICKET_PATH).hasAnyRole("PLATFORM_ADMIN", "DRIVER")
+                // EventSource 请求只在精确的订阅入口核销票据。
+                .requestMatchers(request -> "GET".equals(request.getMethod())
+                        && request.getRequestURI().equals(request.getContextPath() + AlertLiveController.PATH)
+                        && request.getParameter("ticket") != null).permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/alerts/*/reviews").hasRole("PLATFORM_ADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/alerts/export").hasRole("PLATFORM_ADMIN")
                 .requestMatchers(HttpMethod.HEAD, "/api/alerts/export").hasRole("PLATFORM_ADMIN")

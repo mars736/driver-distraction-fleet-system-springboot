@@ -157,7 +157,22 @@ class RecognitionQueryIntegrationTest {
                 .andExpect(jsonPath("$.data.password").doesNotExist()).andExpect(jsonPath("$.data.latestAppeals").isEmpty());
         mvc.perform(get(path(ood)).header("Authorization", driverToken)).andExpect(jsonPath("$.data.pred").value(999))
                 .andExpect(jsonPath("$.data.ood").value(true)).andExpect(jsonPath("$.data.participated").value(false));
-        mvc.perform(get(path(low)).header("Authorization", driverToken)).andExpect(jsonPath("$.data.decisionReason").value("LOW_SPEED"));
+        mvc.perform(get(path(low)).header("Authorization", driverToken))
+                .andExpect(jsonPath("$.data.decisionReason").value("LOW_SPEED"))
+                .andExpect(jsonPath("$.data.decisionReasonLabel").value("低速静默"));
+    }
+
+    @Test
+    void recognitionListAndDetailKeepLegacyCodesReadableWithDisplayLabels() throws Exception {
+        jdbc.update("UPDATE recognition_record SET decision_reason='PASSED' WHERE id=?", ordinary);
+        mvc.perform(get(path(ordinary)).header("Authorization", driverToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.decisionReason").value("PASSED"))
+                .andExpect(jsonPath("$.data.decisionReasonLabel").value("未知判定原因"));
+        mvc.perform(get("/api/recognitions").param("behaviorCode", "c4").header("Authorization", driverToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.list[0].id").value(low))
+                .andExpect(jsonPath("$.data.list[0].decisionReasonLabel").value("低速静默"));
     }
 
     @Test void foreignOwnerlessAndMissingDetailsAreIndistinguishableForDriver() throws Exception {

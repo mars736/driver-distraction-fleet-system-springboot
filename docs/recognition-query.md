@@ -41,7 +41,24 @@ Authorization: Bearer <token>
 
 ## 返回内容及前端衔接
 
-每条记录包含 id、摄像头/车辆/司机/车队 ID、车牌及司机/车队显示名称、采集时间、原始 pred、有效 behaviorCode、maxP、energy、knnDist、OOD、participated、decisionReason、speedKmh、speedStatus、创建/更新时间和 keyFrameUrl。
+每条记录包含 id、摄像头/车辆/司机/车队 ID、车牌及司机/车队显示名称、采集时间、原始 pred、有效 behaviorCode、maxP、energy、knnDist、OOD、participated、decisionReason、decisionReasonLabel、speedKmh、speedStatus、创建/更新时间和 keyFrameUrl。
+
+### 识别判定原因
+
+列表和详情的 `decisionReason` 保留原始代码。`decisionReasonLabel` 是供页面显示的中文文案。代码表示这一帧是否进入告警判定。参与判定的帧可能是正常驾驶，也可能触发告警。
+
+| 代码 | 显示文案 |
+| --- | --- |
+| `EVALUATED` | 已参与告警判定 |
+| `LOW_SPEED` | 低速静默 |
+| `OOD` | 分布外样本 |
+| `INVALID_PREDICTION` | 无效预测结果 |
+| `OUT_OF_ORDER` | 采集时间乱序 |
+| `MISSING_VEHICLE` | 未关联车辆 |
+| `VEHICLE_NOT_FOUND` | 关联车辆不存在 |
+
+旧记录中的未知代码会原样返回，中文标签为「未知判定原因」。`latestAppeals[].decisionReason` 继续返回人工处理理由。
+
 
 ID 和识别结果保持采集时的历史值；车牌和姓名是当前档案的显示值，档案已不存在时名称为空，识别记录仍然可查。不返回密码、物理文件路径、内部 source_key 或进程内帧号。
 

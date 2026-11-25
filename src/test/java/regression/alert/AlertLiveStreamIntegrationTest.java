@@ -95,6 +95,38 @@ class AlertLiveStreamIntegrationTest {
     }
 
     @Test
+    void nativeEventSourceTicketCanOnlyOpenItsOwnersStreamAndCannotBeReused() throws Exception {
+        String ticket = issueTicket(driverA);
+        assertThat(http.send(request("/api/alerts?ticket=" + ticket, null).build(),
+                HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(401);
+
+        String url = "/api/alerts/stream?ticket=" + ticket;
+        try (var own = subscribe(url, null)) {
+            fire(input(driverB));
+            fire(input(driverA));
+            assertThat(nextAlert(own)).isEqualTo(newestAlert(driverA));
+            var replay = http.send(request(url, null).header("Accept", "text/event-stream").build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertThat(replay.statusCode()).isEqualTo(401);
+            assertThat(json.readTree(replay.body()).path("code").asInt()).isEqualTo(401);
+        }
+    }
+
+    @Test
+    void ticketIssuanceRequiresAnAuthorizedAccountAndRedemptionRechecksTokenVersion() throws Exception {
+        for (Long user : java.util.Arrays.asList(null, unknownRole)) {
+            var denied = http.send(request("/api/alerts/stream-ticket", user)
+                            .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
+            assertThat(denied.statusCode()).isEqualTo(user == null ? 401 : 403);
+        }
+        String ticket = issueTicket(driverA);
+        jdbc.update("UPDATE sys_user SET token_version=1 WHERE id=?", driverA);
+        var response = http.send(request("/api/alerts/stream?ticket=" + ticket, null)
+                        .header("Accept", "text/event-stream").build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(response.statusCode()).isEqualTo(401);
+    }
+
+    @Test
     void suppressesRolledBackAndAlreadyPersistedEvents() throws Exception {
         try (var all = subscribe(admin)) {
             var rolledBack = input(driverA);
@@ -218,8 +250,22 @@ class AlertLiveStreamIntegrationTest {
         throw new AssertionError("事件流提前关闭");
     }
 
+    private String issueTicket(long userId) throws Exception {
+        var response = http.send(request("/api/alerts/stream-ticket", userId).POST(HttpRequest.BodyPublishers.noBody()).build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.headers().firstValue("Cache-Control")).hasValue("no-store");
+        var data = json.readTree(response.body()).path("data");
+        assertThat(data.path("expiresAt").asText()).isNotBlank();
+        return data.path("ticket").asText();
+    }
+
     private Scanner subscribe(long userId) throws Exception {
-        var response = http.send(request("/api/alerts/stream", userId).header("Accept", "text/event-stream").build(),
+        return subscribe("/api/alerts/stream", userId);
+    }
+
+    private Scanner subscribe(String url, Long userId) throws Exception {
+        var response = http.send(request(url, userId).header("Accept", "text/event-stream").build(),
                 HttpResponse.BodyHandlers.ofInputStream());
         assertThat(response.statusCode()).isEqualTo(200);
         assertThat(response.headers().firstValue("Content-Type")).hasValueSatisfying(

@@ -5,6 +5,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import service.alert.rule.AlertKind;
 import service.alert.rule.AlertRuleEngine;
+import service.alert.rule.RecognitionDecisionReason;
 import service.alert.rule.VehicleAlertState;
 
 import java.time.Instant;
@@ -44,7 +45,7 @@ class AlertRuleEngineTest {
         frame(1); frame(3);
         var skipped = frame(0, true, 20.0, false);
         assertThat(skipped.participated()).isFalse();
-        assertThat(skipped.reason()).isEqualTo("OOD");
+        assertThat(skipped.reason()).isEqualTo(RecognitionDecisionReason.OOD);
         assertThat(state.getSmsFrames()).isEqualTo(2);
         frame(1); frame(3);
         assertThat(frame(1).alerts()).containsExactly(AlertKind.SMS_ALERT);
@@ -108,7 +109,7 @@ class AlertRuleEngineTest {
     void knownLowSpeedSilencesEvenOodAndResetsContinuity(double speed) {
         for (int i = 0; i < 4; i++) { frame(1); }
         var silent = frame(1, true, speed, false);
-        assertThat(silent.reason()).isEqualTo("LOW_SPEED");
+        assertThat(silent.reason()).isEqualTo(RecognitionDecisionReason.LOW_SPEED);
         assertThat(silent.alerts()).isEmpty();
         assertThat(state.getSmsFrames()).isZero();
         assertThat(frame(1).alerts()).isEmpty();
@@ -176,7 +177,7 @@ class AlertRuleEngineTest {
     @Test
     void invalidPredictionIsNotClassifiedAsDistraction() {
         frame(1);
-        assertThat(frame(10).reason()).isEqualTo("INVALID_PREDICTION");
+        assertThat(frame(10).reason()).isEqualTo(RecognitionDecisionReason.INVALID_PREDICTION);
         assertThat(state.getSmsFrames()).isZero();
         assertThat(state.getOtherEvents()).isZero();
     }
@@ -185,7 +186,7 @@ class AlertRuleEngineTest {
     void missingVehicleCannotGenerateAlerts() {
         var result = engine.evaluate(state,
                 new AlertRuleEngine.Observation(null, null, time, 1, false, null, false));
-        assertThat(result.reason()).isEqualTo("MISSING_VEHICLE");
+        assertThat(result.reason()).isEqualTo(RecognitionDecisionReason.MISSING_VEHICLE);
         assertThat(result.alerts()).isEmpty();
     }
 
@@ -195,7 +196,7 @@ class AlertRuleEngineTest {
         VehicleAlertState before = new VehicleAlertState(state);
         var old = engine.evaluate(state, new AlertRuleEngine.Observation(1L, 7L,
                 state.getLastCapturedAt() - 1, 0, false, 20.0, false));
-        assertThat(old.reason()).isEqualTo("OUT_OF_ORDER");
+        assertThat(old.reason()).isEqualTo(RecognitionDecisionReason.OUT_OF_ORDER);
         assertThat(old.state()).isEqualTo(before);
         engine.evaluate(state, new AlertRuleEngine.Observation(1L, 7L, time++, 1, false, 20.0, false));
         assertThat(state).isEqualTo(before);
