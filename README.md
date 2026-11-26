@@ -12,7 +12,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    USE driver_fleet;
    ```
 
-   新库执行 `src/main/resources/db/schema.sql`，创建三十六张业务表。已有申诉模块的数据库按顺序执行以下迁移。更旧的数据库先执行告警复核及申诉迁移。应用启动时不会自动执行这些脚本。
+   新库执行 `src/main/resources/db/schema.sql`，创建业务表。已有申诉模块的数据库按顺序执行以下迁移。更旧的数据库先执行告警复核及申诉迁移。应用启动时不会自动执行这些脚本。
 
    - `src/main/resources/db/migrations/20261119_vehicle_telemetry.sql`
    - `src/main/resources/db/migrations/20261120_alert_key_frame_timeline.sql`
@@ -32,6 +32,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    - `src/main/resources/db/migrations/20261126_workforce_task_attendance.sql`
    - `src/main/resources/db/migrations/20261126_fleet_care_certificates_fuel.sql`
    - `src/main/resources/db/migrations/20261126_camera_config_and_audit_identity.sql`
+   - `src/main/resources/db/migrations/20261126_workforce_shift_version.sql`
 3. 在 `src/main/resources/application.yml` 中配置 `spring.datasource` 的地址、用户名和密码。启动前必须完成建库、建表，因为应用初始化时会查询摄像头表。
 4. 在项目根目录执行：
 
@@ -82,8 +83,13 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 # 权限和进程生命周期回归测试，不需要 MySQL、FFmpeg 或推理服务
 .\mvnw.cmd "-Dtest=CameraSecurityTest,FfmpegManagerTest" test
 
-# 全部常规测试：现有 contextLoads 测试需要配置可用的 MySQL 和上述三十六张表
+# 全部常规测试：现有 contextLoads 测试需要配置可用的 MySQL 和上述业务表
 .\mvnw.cmd test
 ```
 
 `PipelineSmokeTest` 是手动运行的 `main`，需要 FFmpeg 和 FastAPI，不会随 Maven 单元测试自动执行。
+
+
+### 司机排班保存
+
+`GET /api/operations/workforce/shifts` 的每条 `shift` 含 `version`。新建时可省略版本或传 `0`，成功后返回版本 `1`。更新时须提交已读取的版本，保存成功后版本递增。版本缺失或过期的更新返回 `409` 和 `SHIFT_VERSION_CONFLICT`，前端应重新加载后再编辑。可选 `reason` 最长 300 字，随操作者及变更前后的版本、班次类型和起止时间写入 `driver_shift_change`。

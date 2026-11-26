@@ -45,7 +45,7 @@ public class WorkforceService {
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public Shift saveShift(ShiftRequest input) {
-        admin();
+        var actor = admin();
         var driver = lockDriver(input.driverId());
         LocalDate date = input.date();
         check(date.getYear() >= 1000 && date.getYear() <= 9998, 400, "排班日期无效");
@@ -53,6 +53,8 @@ public class WorkforceService {
         require(!date.isBefore(at.toLocalDate()), HISTORICAL_SHIFT_READ_ONLY);
         var before = mapper.shift(driver.getId(), date);
         check(before == null || mapper.attendance(before.id()) == null, 409, "已有打卡记录的班次不能修改");
+        long expectedVersion = input.version() == null ? 0 : input.version();
+        require(expectedVersion == (before == null ? 0 : before.version()), SHIFT_VERSION_CONFLICT);
 
         LocalDateTime start = input.startsAt();
         LocalDateTime end = input.endsAt();
@@ -75,6 +77,7 @@ public class WorkforceService {
         }
         mapper.saveShift(driver.getId(), driver.getFleetId(), date, input.type(), start, end);
         var result = mapper.shift(driver.getId(), date);
+        mapper.recordShiftChange(before, result, actor.userId(), input.reason(), at);
         audit.success(OperationAction.SHIFT_SAVE, result.id(), driver.getFleetId(), input.type().name());
         return result;
     }
