@@ -106,7 +106,7 @@ public class AppealService {
         // 撤回申诉不等于撤销告警：这里只改变申诉状态，原告警和材料都保留。
         appeal.setStatus(AppealStatus.WITHDRAWN); appeal.setUpdateTime(now());
         requireWrite(mapper.finish(appeal));
-        event(appeal, actor, "WITHDRAWN", "司机撤回未处理申诉", null, null);
+        appeal.setDecisionEventId(event(appeal, actor, "WITHDRAWN", "司机撤回未处理申诉", null, null).getId());
         return appeal;
     }
 
@@ -139,7 +139,8 @@ public class AppealService {
             // 所有变更都先锁目标、再锁申诉，和直接人工处理入口使用相同锁顺序。
             var alert = reviewMapper.lockAlert(appeal.getTargetId());
             if (!"OPEN".equals(alert.getStatus()) && !"CONFIRMED".equals(alert.getStatus())) {
-                throw new BusinessException(409, "告警状态已变更，请刷新");
+                throw new AppealReviewConflict(AppealReviewConflict.Reason.ALERT_STATUS_CHANGED,
+                        appeal.getStatus(), null, "告警状态已变更，请刷新");
             }
             // CONFIRMED→CONFIRMED 也是一次复核，MySQL 可能报告 0 个实际变更行。
             if (!alert.getStatus().equals(request.getStatus().name())) {
@@ -155,7 +156,7 @@ public class AppealService {
         appeal.setStatus(AppealStatus.valueOf(request.getStatus().name())); appeal.setDecisionReason(reason);
         appeal.setReviewerId(actor.getId()); appeal.setReviewedAt(now()); appeal.setUpdateTime(appeal.getReviewedAt());
         requireWrite(mapper.finish(appeal));
-        event(appeal, actor, appeal.getStatus().name(), reason, reviewId, null);
+        appeal.setDecisionEventId(event(appeal, actor, appeal.getStatus().name(), reason, reviewId, null).getId());
         appeal.setEffectiveStatus(request.getStatus() == AlertStatus.REVOKED ? "REVOKED" : "EFFECTIVE");
         audit.success(OperationAction.APPEAL_DECIDE, id, appeal.getFleetId(), appeal.getStatus().name());
         if (reviewId != null && request.getStatus() == AlertStatus.REVOKED) {
@@ -174,7 +175,13 @@ public class AppealService {
         // 取得锁后再读一次最新状态：等待期间，另一位操作者可能已经复核或撤回。
         var locked = mapper.lock(id);
         if (locked == null) { throw new BusinessException(404, "申诉不存在"); }
-        if (locked.getStatus() != AppealStatus.PENDING) { throw new BusinessException(409, "申诉已处理或撤回"); }
+        if (locked.getStatus() != AppealStatus.PENDING) {
+            boolean withdrawn = locked.getStatus() == AppealStatus.WITHDRAWN;
+            throw new AppealReviewConflict(withdrawn ? AppealReviewConflict.Reason.APPEAL_WITHDRAWN
+                    : AppealReviewConflict.Reason.APPEAL_ALREADY_REVIEWED, locked.getStatus(),
+                    mapper.lockDecisionEventId(id, locked.getStatus()),
+                    withdrawn ? "司机已撤回这条申诉" : "管理员已复核这条申诉");
+        }
         return locked;
     }
 

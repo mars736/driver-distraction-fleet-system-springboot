@@ -63,3 +63,7 @@ Remove-Item Env:\DRIVER_FLEET_DB_TESTS
 响应体的 `data.reason` 为 `PENDING_APPEAL` 或 `ALREADY_REVIEWED`。
 收到 `PENDING_APPEAL` 时可以使用 `data.pendingAppealId` 打开申诉。
 两种冲突都应刷新详情再决定下一步操作。
+
+
+管理员告警详情还返回 `latestReviewId` 和 `workOrderId`。直接复核未收到响应时，
+先取详情和 `GET /api/alerts/{id}/reviews`，按 `latestReviewId` 核对办理记录、操作人和时间。

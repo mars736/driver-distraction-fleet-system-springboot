@@ -7,6 +7,7 @@
 1. `20261122_report_jobs.sql`
 2. `20261122_recognition_cleanup.sql`
 3. `20261122_vehicle_track_index.sql`
+4. `20261126_dashboard_report_notifications.sql`
 
 新库执行完整 `schema.sql`。以下接口均需平台管理员 Bearer Token。查询时间未另说明时使用北京时间，范围含开始、不含结束。
 
@@ -44,6 +45,18 @@
 - 报表只允许申请人查看和下载。未完成时下载返回 409，过期返回 410，他人任务返回 404。状态为 `COMPLETED` 的文件保留 7 天，清理后历史仍可查询。创建、下载记入操作日志。
 - 报表保存在 `file.upload-dir/reports`。多实例使用同一数据库时，应配置同一受保护的文件目录。生成中断的任务在 15 分钟后回收，可重试一次。部署时允许写入上传目录和 Java 临时目录。
 - PDF 使用可嵌入的中文字体。Windows 默认找 `%WINDIR%/Fonts/simhei.ttf`，Linux 会尝试系统的 Noto Sans CJK。若缺少默认字体，在 Spring 配置 `report.pdf-font`（环境变量 `REPORT_PDF_FONT`）填字体绝对路径，TTC 需附字体下标，例如 `/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc,2`。
+
+### 防止重复创建和核对取数时间
+
+前端发起一次新申请时生成一个请求标识，例如 UUID，并通过 `Idempotency-Key` 请求头提交。
+响应丢失时沿用该标识及原申请条件重试。相同管理员使用相同标识和筛选条件会收到原任务，
+包括已完成或已过期的任务。使用同一标识修改报表类型、格式或筛选条件时返回 HTTP 409，
+`data.reason` 为 `IDEMPOTENCY_KEY_REUSED`。重新生成报表时使用新的标识。
+旧客户端可以省略该请求头，继续沿用原申请方式。
+
+`dataAsOf` 是后台开始读取本次报表数据时记录的北京时间。已生成的任务详情和文件
+使用同一个值。Excel 在「取数信息」工作表展示，PDF 在标题下展示。历史任务缺少此信息时返回空。
+报表文件按生成时的结果归档，之后的告警撤销影响在线结果和新生成的报表。
 
 ## 识别记录删除和关键帧清理
 

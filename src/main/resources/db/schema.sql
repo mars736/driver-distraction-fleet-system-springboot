@@ -290,6 +290,7 @@ CREATE TABLE IF NOT EXISTS recognition_file_cleanup (
 CREATE TABLE IF NOT EXISTS report_job (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     owner_id BIGINT NOT NULL,
+    request_key VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NULL,
     report_type VARCHAR(24) NOT NULL,
     format VARCHAR(8) NOT NULL,
     filters_json JSON NOT NULL,
@@ -298,6 +299,7 @@ CREATE TABLE IF NOT EXISTS report_job (
     started_at DATETIME(3) NULL,
     finished_at DATETIME(3) NULL,
     expires_at DATETIME(3) NULL,
+    data_as_of DATETIME(3) NULL,
     run_token CHAR(36) NULL,
     attempts INT NOT NULL DEFAULT 0,
     row_count INT NULL,
@@ -305,7 +307,8 @@ CREATE TABLE IF NOT EXISTS report_job (
     KEY idx_report_owner (owner_id, id),
     KEY idx_report_status (status, id),
     KEY idx_report_expiry (status, expires_at),
-    UNIQUE KEY uk_report_run_token (run_token)
+    UNIQUE KEY uk_report_run_token (run_token),
+    UNIQUE KEY uk_report_owner_request (owner_id, request_key)
 ) COMMENT '异步报表与导出历史';
 
 CREATE TABLE IF NOT EXISTS driver_shift (
@@ -471,6 +474,14 @@ CREATE TABLE IF NOT EXISTS violation_work_order (
     KEY idx_work_order_assignment (assignee_id, status),
     CONSTRAINT fk_work_order_alert FOREIGN KEY (alert_id) REFERENCES alert_record(id) ON DELETE CASCADE
 ) COMMENT '违规告警处置工单';
+
+CREATE TABLE IF NOT EXISTS work_order_legacy_revocation_note (
+    work_order_id BIGINT PRIMARY KEY,
+    work_done VARCHAR(500) NOT NULL,
+    resolution VARCHAR(500) NOT NULL,
+    recorded_by BIGINT NOT NULL,
+    recorded_at DATETIME(3) NOT NULL
+) COMMENT '历史撤销工单补记';
 
 CREATE TABLE IF NOT EXISTS dispatch_operator_location (
     user_id BIGINT PRIMARY KEY,

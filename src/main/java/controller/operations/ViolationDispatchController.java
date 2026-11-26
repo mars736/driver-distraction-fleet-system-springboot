@@ -17,17 +17,21 @@ public class ViolationDispatchController {
     private final ViolationDispatchService service;
 
     @GetMapping("/orders")
-    public Result<List<WorkOrder>> list(@RequestParam(required = false) Long fleetId,
-                                      @RequestParam(required = false) Long driverId,
-                                      @RequestParam(required = false) Status status,
-                                      @RequestParam(required = false) RiskLevel risk,
+    public Result<List<WorkOrder>> list(@Valid @ModelAttribute OrderFilter filter,
                                       @RequestParam(defaultValue = "1") int page,
                                       @RequestParam(defaultValue = "20") int pageSize) {
-        return Result.success(service.list(fleetId, driverId, status, risk, page, pageSize));
+        return Result.success(service.list(filter, page, pageSize));
+    }
+
+    @GetMapping("/orders/page")
+    public Result<OrderPage> page(@Valid @ModelAttribute OrderFilter filter,
+                                  @RequestParam(required = false) Long beforeId,
+                                  @RequestParam(defaultValue = "20") int pageSize) {
+        return Result.success(service.page(filter, beforeId, pageSize));
     }
 
     @GetMapping("/orders/{id}")
-    public Result<WorkOrder> detail(@PathVariable long id) { return Result.success(service.detail(id)); }
+    public Result<WorkOrderDetail> detail(@PathVariable long id) { return Result.success(service.detail(id)); }
 
     @PutMapping("/operator-position")
     public Result<Void> position(@Valid @RequestBody Position position) {
@@ -57,6 +61,12 @@ public class ViolationDispatchController {
     @PostMapping("/orders/{id}/revocation-wrapup")
     public Result<WorkOrder> wrapUpRevocation(@PathVariable long id, @Valid @RequestBody RevocationWrapup input) {
         return Result.success(service.wrapUpRevocation(id, input));
+    }
+
+    @PostMapping("/orders/{id}/legacy-revocation-note")
+    public Result<LegacyRevocationNote> recordLegacyRevocation(@PathVariable long id,
+                                                              @Valid @RequestBody RevocationWrapup input) {
+        return Result.success(service.recordLegacyRevocation(id, input));
     }
 
     @GetMapping("/orders/{id}/personnel-recommendation")

@@ -54,15 +54,54 @@ public class ViolationDispatchService {
         }
     }
 
-    public List<WorkOrder> list(Long fleetId, Long driverId, Status status, RiskLevel risk, int page, int size) {
+    public List<WorkOrder> list(OrderFilter filter, int page, int size) {
         admin();
-        check((fleetId == null || fleetId > 0) && (driverId == null || driverId > 0), 400, "车队或司机 ID 无效");
-        return orders.list(fleetId, driverId, status, risk, offset(page, size), size);
+        return orders.list(filter, null, offset(page, size), size);
     }
 
-    public WorkOrder detail(long id) {
+    public OrderPage page(OrderFilter filter, Long beforeId, int size) {
         admin();
-        return find(id);
+        check(beforeId == null || beforeId > 0, 400, "分页游标必须为正数");
+        var rows = orders.list(filter, beforeId, offset(1, size), size + 1);
+        boolean hasNext = rows.size() > size;
+        var records = hasNext ? List.copyOf(rows.subList(0, size)) : rows;
+        return new OrderPage(records, hasNext, hasNext ? records.getLast().id() : null);
+    }
+
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public WorkOrderDetail detail(long id) {
+        admin();
+        var order = find(id);
+        boolean legacy = isLegacyRevocation(order);
+        var note = legacy ? orders.legacyRevocationNote(id) : null;
+        boolean needsReview = legacy && note == null;
+        return new WorkOrderDetail(order, availableActions(order, needsReview), needsReview, note);
+    }
+
+    private List<OrderAction> availableActions(WorkOrder order, boolean needsReview) {
+        if ("REVOKED".equals(order.alertStatus())) {
+            if (needsReview) { return List.of(OrderAction.RECORD_LEGACY_REVOCATION); }
+            if (order.status() == Status.REVOKE_WRAPUP) { return List.of(OrderAction.REVOCATION_WRAPUP); }
+            return List.of();
+        }
+        return switch (order.status()) {
+            case PENDING -> {
+                var candidates = order.latitude() == null || order.longitude() == null
+                        ? List.<Candidate>of() : ranked(order, now());
+                yield canAssignNearest(candidates) ? List.of(OrderAction.ASSIGN, OrderAction.ASSIGN_NEAREST)
+                        : List.of(OrderAction.ASSIGN);
+            }
+            case ASSIGNED -> List.of(OrderAction.START);
+            case IN_PROGRESS -> List.of(OrderAction.CLOSE);
+            case CLOSED -> order.recommendationAction() == null && evaluate(order, now()).eligible()
+                    ? List.of(OrderAction.PERSONNEL_DECISION) : List.of();
+            default -> List.of();
+        };
+    }
+
+    private boolean isLegacyRevocation(WorkOrder order) {
+        return order.status() == Status.CANCELED && "REVOKED".equals(order.alertStatus())
+                && order.startedAt() != null && order.closedAt() == null && order.revocationSource() == null;
     }
 
     @Transactional
@@ -88,7 +127,7 @@ public class ViolationDispatchService {
         admin();
         var order = lockActiveOrder(id, Status.PENDING);
         var candidates = ranked(order, now());
-        check(!candidates.isEmpty() && candidates.getFirst().dispatchCost() != null, 409, "缺少工单位置或人员近期位置，请手动派发");
+        check(canAssignNearest(candidates), 409, "缺少工单位置或人员近期位置，请手动派发");
         return assignTo(order, candidates.getFirst().userId(), "NEAREST");
     }
 
@@ -122,11 +161,32 @@ public class ViolationDispatchService {
     public WorkOrder wrapUpRevocation(long id, RevocationWrapup input) {
         long actor = admin().userId();
         var order = lockOrder(id, Status.REVOKE_WRAPUP, true);
-        check(!input.workDone().isBlank() && !input.resolution().isBlank(), 400, "已完成工作和收尾说明不能为空");
-        var notes = new RevocationWrapup(input.workDone().strip(), input.resolution().strip());
+        var notes = normalizeNotes(input);
         check(orders.closeRevoked(id, actor, notes, now()) == 1, 409, "工单状态已变更");
         audit.success(OperationAction.DISPATCH_REVOCATION_WRAPUP, id, order.fleetId());
         return find(id);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public LegacyRevocationNote recordLegacyRevocation(long id, RevocationWrapup input) {
+        long actor = admin().userId();
+        var order = lockOrder(id, Status.CANCELED, true);
+        check(isLegacyRevocation(order), 409, "工单无需历史撤销补记");
+        check(orders.legacyRevocationNote(id) == null, 409, "工单已有历史撤销补记");
+        var notes = normalizeNotes(input);
+        var note = new LegacyRevocationNote(id, notes.workDone(), notes.resolution(), actor, now());
+        check(orders.insertLegacyRevocationNote(note) == 1, 409, "历史撤销补记未写入");
+        audit.success(OperationAction.DISPATCH_LEGACY_REVOCATION, id, order.fleetId());
+        return orders.legacyRevocationNote(id);
+    }
+
+    private RevocationWrapup normalizeNotes(RevocationWrapup input) {
+        check(!input.workDone().isBlank() && !input.resolution().isBlank(), 400, "已完成工作和收尾说明不能为空");
+        return new RevocationWrapup(input.workDone().strip(), input.resolution().strip());
+    }
+
+    private boolean canAssignNearest(List<Candidate> candidates) {
+        return !candidates.isEmpty() && candidates.getFirst().dispatchCost() != null;
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)

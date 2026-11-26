@@ -3,9 +3,12 @@
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="mapper.ReportJobMapper">
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO report_job (owner_id, report_type, format, filters_json, status, created_at)
-        VALUES (#{ownerId}, #{reportType}, #{format}, #{filtersJson}, #{status}, #{createdAt})
+        INSERT INTO report_job (owner_id, request_key, report_type, format, filters_json, status, created_at)
+        VALUES (#{ownerId}, #{requestKey}, #{reportType}, #{format}, #{filtersJson}, #{status}, #{createdAt})
     </insert>
+    <select id="findByRequestKey" resultType="entity.ReportJob">
+        SELECT * FROM report_job WHERE owner_id=#{owner} AND request_key=#{key}
+    </select>
     <select id="byOwner" resultType="entity.ReportJob">
         SELECT * FROM report_job WHERE id = #{id} AND owner_id = #{owner}
     </select>
@@ -21,7 +24,8 @@
         WHERE id = #{id} AND status = 'PENDING'
     </update>
     <update id="complete">
-        UPDATE report_job SET status = 'COMPLETED', finished_at = #{now}, expires_at = #{expiry}, row_count = #{rows}
+        UPDATE report_job SET status = 'COMPLETED', finished_at = #{now}, expires_at = #{expiry}, row_count = #{rows},
+            data_as_of = #{dataAsOf}
         WHERE id = #{id} AND status = 'RUNNING' AND run_token = #{token}
     </update>
     <update id="fail">

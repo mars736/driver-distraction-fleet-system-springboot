@@ -12,7 +12,9 @@
         SELECT p.*, CASE WHEN p.target_type='ALERT' THEN
             CASE WHEN a.status='REVOKED' THEN 'REVOKED'
                  WHEN a.status IN ('OPEN','CONFIRMED') THEN 'EFFECTIVE' END
-            ELSE <include refid="mapper.RecognitionQueryMapper.effectiveStatus"/> END AS effective_status
+            ELSE <include refid="mapper.RecognitionQueryMapper.effectiveStatus"/> END AS effective_status,
+            (SELECT e.id FROM alert_appeal_event e WHERE e.appeal_id=p.id AND e.action=p.status
+             ORDER BY e.id DESC LIMIT 1) AS decision_event_id
         FROM alert_appeal p
         LEFT JOIN alert_record a ON p.target_type='ALERT' AND a.id=p.target_id
         LEFT JOIN recognition_record r ON p.target_type='RECOGNITION' AND r.id=p.target_id
@@ -51,6 +53,10 @@
     <select id="count" resultType="long">SELECT COUNT(*) FROM alert_appeal <include refid="filters"/></select>
     <select id="list" resultType="entity.AppealRecord">
         SELECT * FROM alert_appeal <include refid="filters"/> ORDER BY create_time DESC,id DESC LIMIT #{q.pageSize} OFFSET #{offset}
+    </select>
+    <select id="lockDecisionEventId" resultType="long">
+        SELECT id FROM alert_appeal_event WHERE appeal_id=#{appealId} AND action=#{status}
+        ORDER BY id DESC LIMIT 1 FOR UPDATE
     </select>
     <insert id="insertEvent" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO alert_appeal_event(appeal_id,action,content,operator_id,operator_username,operator_name,operator_role,alert_review_id,material_id,operated_at)

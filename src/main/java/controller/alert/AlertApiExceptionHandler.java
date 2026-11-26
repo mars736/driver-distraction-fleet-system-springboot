@@ -12,6 +12,7 @@ import controller.operations.WorkforceController;
 import controller.operations.ViolationDispatchController;
 import common.response.Result;
 import service.alert.AlertReviewConflict;
+import service.alert.AppealReviewConflict;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -36,6 +37,12 @@ import java.io.IOException;
 public class AlertApiExceptionHandler {
     @ExceptionHandler(AlertReviewConflict.class)
     public ResponseEntity<Result<AlertReviewConflict.Details>> reviewConflict(AlertReviewConflict exception) {
+        return ResponseEntity.status(exception.getCode()).contentType(MediaType.APPLICATION_JSON)
+                .body(new Result<>(exception.getCode(), exception.getMessage(), exception.getDetails()));
+    }
+
+    @ExceptionHandler(AppealReviewConflict.class)
+    public ResponseEntity<Result<AppealReviewConflict.Details>> appealConflict(AppealReviewConflict exception) {
         return ResponseEntity.status(exception.getCode()).contentType(MediaType.APPLICATION_JSON)
                 .body(new Result<>(exception.getCode(), exception.getMessage(), exception.getDetails()));
     }

@@ -33,14 +33,14 @@ class ReportRenderer {
         this.pdfFont = pdfFont;
     }
 
-    void render(ReportFormat format, ReportTable table, OutputStream output) throws Exception {
+    void render(ReportFormat format, ReportTable table, LocalDateTime dataAsOf, OutputStream output) throws Exception {
         switch (format) {
-            case XLSX -> excel(table, output);
-            case PDF -> pdf(table, output);
+            case XLSX -> excel(table, dataAsOf, output);
+            case PDF -> pdf(table, dataAsOf, output);
         }
     }
 
-    private void excel(ReportTable table, OutputStream output) throws Exception {
+    private void excel(ReportTable table, LocalDateTime dataAsOf, OutputStream output) throws Exception {
         try (var workbook = new SXSSFWorkbook(100)) {
             var sheet = workbook.createSheet(table.title());
             var heading = workbook.createCellStyle();
@@ -67,6 +67,12 @@ class ReportRenderer {
                     writeExcelCell(row.createCell(column), values[column], time);
                 }
             }
+            var metadata = workbook.createSheet("取数信息");
+            metadata.setColumnWidth(0, 24 * 256);
+            metadata.setColumnWidth(1, 28 * 256);
+            var snapshotRow = metadata.createRow(0);
+            snapshotRow.createCell(0).setCellValue("取数时间（北京时间）");
+            writeExcelCell(snapshotRow.createCell(1), dataAsOf, time);
             workbook.write(output);
         }
     }
@@ -86,7 +92,7 @@ class ReportRenderer {
         }
     }
 
-    private void pdf(ReportTable table, OutputStream output) throws Exception {
+    private void pdf(ReportTable table, LocalDateTime dataAsOf, OutputStream output) throws Exception {
         BaseFont cjk = BaseFont.createFont(findFont(), BaseFont.IDENTITY_H, BaseFont.EMBEDDED);
         if (!cjk.charExists('报')) {
             throw new BusinessException(422, "配置的 PDF 字体缺少中文字符");
@@ -98,7 +104,7 @@ class ReportRenderer {
         document.open();
         try {
             document.add(new Paragraph(table.title(), new Font(cjk, 16, Font.BOLD)));
-            document.add(new Paragraph("时间均为北京时间", new Font(cjk, 9)));
+            document.add(new Paragraph("取数时间（北京时间） " + TEXT_DATE.format(dataAsOf), new Font(cjk, 9)));
             var grid = new PdfPTable(table.columns().size());
             grid.setWidthPercentage(100);
             grid.setSpacingBefore(12);
