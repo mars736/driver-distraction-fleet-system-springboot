@@ -92,7 +92,7 @@ class FleetOperationsIntegrationTest {
 
     @Test
     void activeShiftAllowsExactlyOneConcurrentDispatchAndCrossDayAttendanceDeduplicates() throws Exception {
-        var starts = now.minusMinutes(20);
+        var starts = now.minusMinutes(20).isBefore(today.atStartOfDay()) ? today.atStartOfDay() : now.minusMinutes(20);
         var ends = now.plusHours(4);
         var shift = call(HttpMethod.PUT, WORK + "/shifts", admin, Map.of("driverId", driver, "date", starts.toLocalDate(),
                 "type", "LATE", "startsAt", starts, "endsAt", ends), 200);
@@ -226,8 +226,11 @@ class FleetOperationsIntegrationTest {
         jdbc.update("""
                 UPDATE transport_task SET status='RUNNING', starts_at=?, ends_at=?, departed_at=? WHERE id=?
                 """, departed.minusHours(1), departed.plusHours(1), departed, current);
-        assertThat(call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(today.minusDays(1)), 409)
+        jdbc.update("UPDATE transport_task SET driver_id=? WHERE id=?", otherDriver, current);
+        assertThat(call(HttpMethod.PUT, WORK + "/shifts", admin,
+                Map.of("driverId", otherDriver, "date", today, "type", "REST"), 409)
                 .path("reason").asText()).isEqualTo("REST_OVERLAPS_TASK");
+        jdbc.update("UPDATE transport_task SET driver_id=? WHERE id=?", driver, current);
         var leave = requestLeave(today.minusDays(1).atStartOfDay(), now.plusMinutes(30));
         assertThat(call(HttpMethod.POST, WORK + "/leaves/" + leave + "/decision", admin, Map.of("approved", true), 409)
                 .path("reason").asText()).isEqualTo("LEAVE_OVERLAPS_SHIFT");
@@ -326,12 +329,35 @@ class FleetOperationsIntegrationTest {
     }
 
     @Test
+    void historicalShiftsAreReadOnlyAndOvernightShiftsRespectRestDays() throws Exception {
+        var yesterday = today.minusDays(1);
+        assertThat(call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(yesterday), 409)
+                .path("reason").asText()).isEqualTo("HISTORICAL_SHIFT_READ_ONLY");
+        call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(today), 200);
+
+        var first = today.plusDays(1);
+        var second = first.plusDays(1);
+        call(HttpMethod.PUT, WORK + "/shifts", admin, workShift(first.atTime(20, 0), second.atTime(4, 0)), 200);
+        assertThat(call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(second), 409)
+                .path("reason").asText()).isEqualTo("SHIFT_OVERLAPS_SHIFT");
+        call(HttpMethod.PUT, WORK + "/shifts", admin, workShift(first.atTime(16, 0), second.atStartOfDay()), 200);
+        call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(second), 200);
+        assertThat(call(HttpMethod.PUT, WORK + "/shifts", admin,
+                workShift(first.atTime(20, 0), second.atTime(4, 0)), 409)
+                .path("reason").asText()).isEqualTo("SHIFT_OVERLAPS_SHIFT");
+    }
+
+    @Test
     void attendanceCountsActualDaysAndApprovedLeaveSeparatelyWithExclusiveEnd() throws Exception {
         var day = today.minusDays(4);
         var end = day.plusDays(1);
         for (var date : List.of(day, end)) {
-            long shift = id(call(HttpMethod.PUT, WORK + "/shifts", admin,
-                    workShift(date.atTime(8, 0), date.atTime(16, 0)), 200));
+            jdbc.update("""
+                    INSERT INTO driver_shift(driver_id,fleet_id,shift_date,shift_type,starts_at,ends_at)
+                    VALUES(?,?,?,'EARLY',?,?)
+                    """, driver, fleet, date, date.atTime(8, 0), date.atTime(16, 0));
+            long shift = jdbc.queryForObject("SELECT id FROM driver_shift WHERE driver_id=? AND shift_date=?",
+                    Long.class, driver, date);
             jdbc.update("""
                     INSERT INTO driver_attendance(shift_id,clock_in_at,clock_in_lat,clock_in_lon)
                     VALUES(?,?,24.48,118.08)
@@ -360,7 +386,7 @@ class FleetOperationsIntegrationTest {
     }
 
     private void prepareOnDuty() throws Exception {
-        var starts = now.minusMinutes(20);
+        var starts = now.minusMinutes(20).isBefore(today.atStartOfDay()) ? today.atStartOfDay() : now.minusMinutes(20);
         call(HttpMethod.PUT, WORK + "/shifts", admin, workShift(starts, now.plusHours(2)), 200);
         call(HttpMethod.POST, WORK + "/attendance/in", driver, Map.of("shiftDate", starts.toLocalDate(),
                 "position", Map.of("latitude", 24.48, "longitude", 118.08)), 200);

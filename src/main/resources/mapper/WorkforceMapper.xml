@@ -25,7 +25,9 @@
 
     <select id="shiftOverlap" resultType="boolean">
         SELECT EXISTS(SELECT 1 FROM driver_shift WHERE driver_id=#{driverId}
-            AND shift_date&lt;&gt;#{date} AND starts_at&lt;#{end} AND ends_at&gt;#{start})
+            AND shift_date&lt;&gt;#{date}
+            AND ((shift_type='REST' AND shift_date&gt;=DATE(#{start}) AND CAST(shift_date AS DATETIME)&lt;#{end})
+                OR (shift_type&lt;&gt;'REST' AND starts_at&lt;#{end} AND ends_at&gt;#{start})))
     </select>
 
     <insert id="saveShift">

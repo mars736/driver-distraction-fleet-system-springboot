@@ -49,6 +49,8 @@ public class WorkforceService {
         var driver = lockDriver(input.driverId());
         LocalDate date = input.date();
         check(date.getYear() >= 1000 && date.getYear() <= 9998, 400, "排班日期无效");
+        var at = now();
+        require(!date.isBefore(at.toLocalDate()), HISTORICAL_SHIFT_READ_ONLY);
         var before = mapper.shift(driver.getId(), date);
         check(before == null || mapper.attendance(before.id()) == null, 409, "已有打卡记录的班次不能修改");
 
@@ -57,7 +59,9 @@ public class WorkforceService {
         if (input.type() == ShiftType.REST) {
             check(start == null && end == null, 400, "休息班次不填写起止时间");
             var restStart = date.atStartOfDay();
-            require(!mapper.taskConflict(driver.getId(), null, restStart, restStart.plusDays(1), now()),
+            var restEnd = restStart.plusDays(1);
+            require(!mapper.shiftOverlap(driver.getId(), date, restStart, restEnd), SHIFT_OVERLAPS_SHIFT);
+            require(!mapper.taskConflict(driver.getId(), null, restStart, restEnd, at),
                     REST_OVERLAPS_TASK);
         } else {
             if (start == null && end == null) {
@@ -66,7 +70,7 @@ public class WorkforceService {
             }
             window(start, end, 1);
             check(start.toLocalDate().equals(date), 400, "班次开始时间应在排班当天");
-            check(!mapper.shiftOverlap(driver.getId(), date, start, end), 409, "班次与相邻日期的排班重叠");
+            require(!mapper.shiftOverlap(driver.getId(), date, start, end), SHIFT_OVERLAPS_SHIFT);
             require(!mapper.leaveOverlap(driver.getId(), 0, start, end), SHIFT_OVERLAPS_LEAVE);
         }
         mapper.saveShift(driver.getId(), driver.getFleetId(), date, input.type(), start, end);
