@@ -92,7 +92,7 @@ class CameraSecurityTest {
             case "GET /api/cameras" -> verify(cameraService).listAll();
             case "GET /api/cameras/7" -> verify(cameraService).getById(7L);
             case "POST /api/cameras" -> verify(cameraService).create(any());
-            case "PUT /api/cameras/7" -> verify(cameraService).update(argThat(c -> c.getId() == 7L));
+            case "PUT /api/cameras/7" -> verify(cameraService).update(eq(7L), any());
             case "PATCH /api/cameras/7/enabled" -> verify(cameraService).updateEnabled(7L, true);
             case "DELETE /api/cameras/7" -> verify(cameraService).delete(7L);
             default -> throw new AssertionError("Unexpected camera endpoint");

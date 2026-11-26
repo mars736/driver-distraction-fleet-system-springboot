@@ -41,7 +41,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 - 抽帧需要安装 FFmpeg，并通过 `video.ffmpeg-path` 指定可执行文件或使用 PATH 中的 `ffmpeg`。
 - 推理服务不在本仓库。默认调用 `http://127.0.0.1:8000/predict`，可通过 `infer.fastapi-url` 修改。
 - 摄像头配置接口 `/api/cameras` 及其子路径的所有读写操作均要求 `PLATFORM_ADMIN`。
-- 启用的摄像头在读流结束、失败或断帧超时时自动重连。配置、操作日志和短信验收见[监控与告警联调](docs/monitoring-delivery.md)。
+- 车辆监控与摄像头启用共同控制抽帧。批准来源、配置及采集状态见[摄像头配置与采集联调](docs/camera-monitoring.md)。操作日志和短信验收见[监控与告警联调](docs/monitoring-delivery.md)。
 - 没有启用摄像头时，日志显示“0 路摄像头”属于正常情况。推理结果已接入异步告警判定，有效车速来自司机 App，短信默认走模拟通道，可配置阿里云真实通道。
 
 司机用 `POST /api/vehicle-telemetry` 上报绑定车辆的定位和速度。后端在识别帧的采集时间查找该司机的近期样本，详情见 [定位上报与联调](docs/vehicle-telemetry.md)。

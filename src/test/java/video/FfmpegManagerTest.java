@@ -142,6 +142,23 @@ class FfmpegManagerTest {
         verify(old).destroy();
     }
 
+    @Test
+    void managedReconnectRechecksWhetherCaptureIsAllowed() throws Exception {
+        properties.setReconnectInitialDelayMs(100);
+        var allowed = new AtomicBoolean(true);
+        ControlledStream first = stream(false);
+        doReturn(process(first, new AtomicBoolean(true))).when(manager).startProcess(camera);
+
+        manager.startManaged(camera, () -> allowed.get() ? camera : null, vehicleId -> 17L);
+        assertThat(first.reading.await(2, TimeUnit.SECONDS)).isTrue();
+        allowed.set(false);
+        first.release.countDown();
+
+        await().atMost(3, TimeUnit.SECONDS).untilAsserted(() ->
+                assertThat(manager.status(camera.getId()).failureReason()).isEqualTo("CONFIG_BLOCKED"));
+        verify(manager, times(1)).startProcess(camera);
+    }
+
     private ControlledStream stream(boolean fail) {
         ControlledStream stream = new ControlledStream(fail);
         streams.add(stream);

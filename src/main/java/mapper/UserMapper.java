@@ -43,6 +43,8 @@ public interface UserMapper {
 
     long countDrivers(@Param("fleetId") Long fleetId, @Param("keyword") String keyword);
 
+    List<Long> findActiveDriversByVehicle(long vehicleId);
+
     int countByEmployeeNoExclude(@Param("employeeNo") String employeeNo,
                                  @Param("excludeId") Long excludeId);
 

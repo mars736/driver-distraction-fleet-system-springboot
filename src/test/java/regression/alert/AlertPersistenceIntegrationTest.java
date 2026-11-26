@@ -90,6 +90,8 @@ class AlertPersistenceIntegrationTest {
     @Autowired SmsChannelProperties smsProperties;
     @Autowired AlertTimelineMapper timelineMapper;
     @Autowired VehicleMapper vehicles;
+    @Autowired mapper.CameraMapper cameras;
+    @Autowired video.FfmpegManager ffmpeg;
     @Autowired AlertRuleEngine engine;
     @Autowired ObjectMapper json;
     @Autowired KeyFrameStore keyFrames;
@@ -281,7 +283,7 @@ class AlertPersistenceIntegrationTest {
         realProperties.setMode(SmsChannelProperties.Mode.ALIYUN);
         realProperties.getAliyun().setOutIdPrefix("integration");
         AlertDecisionService realMode = new AlertDecisionService(mapper, vehicles, speed, engine, json, keyFrames,
-                new AlertTimelineCapture(timelineMapper, keyFrames), event -> {}, deliveries, realProperties);
+                new AlertTimelineCapture(timelineMapper, keyFrames), event -> {}, deliveries, realProperties, cameras, ffmpeg);
         var transaction = new TransactionTemplate(transactions);
         CapturedInference last = null;
         for (int i = 0; i < 5; i++) {
@@ -336,7 +338,7 @@ class AlertPersistenceIntegrationTest {
         for (int i = 0; i < 4; i++) { service.process(input(1, false), false); }
         AlertDecisionService restarted = new AlertDecisionService(mapper, vehicles, speed, engine, json, keyFrames,
                 new AlertTimelineCapture(timelineMapper, keyFrames), event -> {},
-                deliveries, smsProperties);
+                deliveries, smsProperties, cameras, ffmpeg);
         CapturedInference fifth = input(3, false);
         List<AlertRecord> alerts = new TransactionTemplate(transactions).execute(status -> {
             try { return restarted.process(fifth, false); }

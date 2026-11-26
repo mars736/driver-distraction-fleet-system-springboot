@@ -11,19 +11,26 @@ import org.springframework.stereotype.Component;
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongFunction;
+import java.util.function.Supplier;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class FfmpegManager {
     private static final int MAX_FRAME_BYTES = 8 * 1024 * 1024;
+    private static final String MANAGED_PREFIX = "managed:";
 
     private final InferFrameQueue frameQueue;
     private final VideoCaptureProperties props;
@@ -33,7 +40,15 @@ public class FfmpegManager {
     private ScheduledExecutorService monitor;
     private boolean closed;
 
-    public synchronized void start(Camera camera) {
+    public void start(Camera camera) {
+        start(camera, null, null);
+    }
+
+    public void startManaged(Camera camera, Supplier<Camera> policy, LongFunction<Long> currentDriver) {
+        start(camera, policy, currentDriver);
+    }
+
+    private synchronized void start(Camera camera, Supplier<Camera> policy, LongFunction<Long> currentDriver) {
         if (closed) { return; }
         if (monitor == null) {
             monitor = Executors.newSingleThreadScheduledExecutor(task -> {
@@ -43,7 +58,9 @@ public class FfmpegManager {
             });
             monitor.scheduleWithFixedDelay(this::check, 100, 100, TimeUnit.MILLISECONDS);
         }
-        Capture capture = captures.computeIfAbsent(camera.getId(), id -> new Capture(camera));
+        Capture previous = captures.get(camera.getId());
+        if (previous != null && !sameConfig(previous.camera, camera)) { stop(camera.getId()); }
+        Capture capture = captures.computeIfAbsent(camera.getId(), id -> new Capture(camera, policy, currentDriver));
         if (capture.process == null || !capture.process.isAlive()) {
             retire(camera.getId(), capture);
             launch(capture);
@@ -58,6 +75,27 @@ public class FfmpegManager {
     public synchronized void restart(Camera camera) {
         stop(camera.getId());
         start(camera);
+    }
+
+    public static boolean isManagedStream(String streamId) {
+        return streamId != null && streamId.startsWith(MANAGED_PREFIX);
+    }
+
+    public synchronized boolean isCurrentStream(long cameraId, String streamId) {
+        Capture capture = captures.get(cameraId);
+        return capture != null && capture.process != null && streamId != null && streamId.equals(capture.streamId);
+    }
+
+    public record Status(String state, Instant lastFrameAt, String failureReason) { }
+
+    public synchronized Status status(long cameraId) {
+        Capture capture = captures.get(cameraId);
+        if (capture == null) { return new Status("STOPPED", null, null); }
+        if (capture.process == null) {
+            String state = "START_FAILED".equals(capture.failureReason) ? "FAILED" : "RETRYING";
+            return new Status(state, capture.lastSuccessfulFrame, capture.failureReason);
+        }
+        return new Status(capture.receivedFrame ? "CAPTURING" : "CONNECTING", capture.lastSuccessfulFrame, null);
     }
 
     @PreDestroy
@@ -78,6 +116,7 @@ public class FfmpegManager {
             if (capture.process != null && (!capture.process.isAlive()
                     || now - capture.lastFrameAt >= silenceTimeout(capture.camera))) {
                 log.warn("摄像头读流停止或超时，准备重连，cameraId={}", capture.camera.getId());
+                capture.failureReason = capture.process.isAlive() ? "NO_FRAMES" : "STREAM_ENDED";
                 retire(capture.camera.getId(), capture);
                 scheduleRetry(capture);
             }
@@ -93,15 +132,23 @@ public class FfmpegManager {
             return;
         }
         try {
+            if (capture.policy != null && !sameConfig(capture.camera, capture.policy.get())) {
+                capture.failureReason = "CONFIG_BLOCKED";
+                scheduleRetry(capture);
+                return;
+            }
             Process process = startProcess(capture.camera);
             capture.process = process;
             capture.lastFrameAt = System.nanoTime();
-            String streamId = UUID.randomUUID().toString();
+            String streamId = (capture.policy == null ? "" : MANAGED_PREFIX) + UUID.randomUUID();
+            capture.streamId = streamId;
+            capture.receivedFrame = false;
             Thread reader = new Thread(() -> readFrames(capture, process, streamId), "ffmpeg-" + id);
             reader.setDaemon(true);
             reader.start();
             log.info("FFmpeg 已启动，cameraId={}", id);
-        } catch (IOException ex) {
+        } catch (IOException | RuntimeException ex) {
+            capture.failureReason = "START_FAILED";
             log.warn("FFmpeg 启动失败，cameraId={}，异常类型={}", id, ex.getClass().getSimpleName());
             scheduleRetry(capture);
         }
@@ -110,6 +157,7 @@ public class FfmpegManager {
     private void retire(long id, Capture capture) {
         Process process = capture.process;
         capture.process = null;
+        capture.streamId = null;
         if (process == null) { return; }
         process.destroy();
         if (process.isAlive()) {
@@ -135,9 +183,14 @@ public class FfmpegManager {
     }
 
     Process startProcess(Camera camera) throws IOException {
-        var builder = new ProcessBuilder(props.getFfmpegPath(), "-fflags", "nobuffer", "-flags", "low_delay",
-                "-i", camera.getStreamUrl(), "-vf", "fps=" + (1.0 / sampleInterval(camera)),
-                "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "2", "-");
+        var args = new ArrayList<>(List.of(
+                props.getFfmpegPath(), "-fflags", "nobuffer", "-flags", "low_delay"));
+        if (camera.getVehicleId() != null) {
+            args.addAll(List.of("-protocol_whitelist", "rtsp,rtp,tcp,udp,http,https,tls,crypto"));
+        }
+        args.addAll(List.of("-i", camera.getStreamUrl(), "-vf", "fps=" + (1.0 / sampleInterval(camera)),
+                "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "2", "-"));
+        var builder = new ProcessBuilder(args);
         return builder.redirectError(ProcessBuilder.Redirect.DISCARD).start();
     }
 
@@ -172,18 +225,41 @@ public class FfmpegManager {
         }
     }
 
-    private synchronized boolean submit(Capture capture, Process process, String streamId, byte[] jpeg) {
-        if (capture.process != process) { return false; }
-        capture.lastFrameAt = System.nanoTime();
-        capture.delayMs = 0;
+    private boolean submit(Capture capture, Process process, String streamId, byte[] jpeg) {
         Camera camera = capture.camera;
-        frameQueue.offer(new InferFrame(frameIds.incrementAndGet(), camera.getId(), camera.getVehicleId(),
-                camera.getDriverId(), System.currentTimeMillis(), jpeg, streamId));
-        return true;
+        long capturedAt = System.currentTimeMillis();
+        Long driver = camera.getDriverId();
+        if (capture.policy != null) {
+            try {
+                if (!sameConfig(camera, capture.policy.get())) { return false; }
+                driver = capture.currentDriver.apply(camera.getVehicleId());
+            } catch (RuntimeException ex) {
+                log.warn("无法核对摄像头采集配置，cameraId={}，异常类型={}", camera.getId(), ex.getClass().getSimpleName());
+                return false;
+            }
+        }
+        synchronized (this) {
+            if (capture.process != process) { return false; }
+            capture.lastFrameAt = System.nanoTime();
+            capture.lastSuccessfulFrame = Instant.ofEpochMilli(capturedAt);
+            capture.receivedFrame = true;
+            capture.failureReason = null;
+            capture.delayMs = 0;
+            frameQueue.offer(new InferFrame(frameIds.incrementAndGet(), camera.getId(), camera.getVehicleId(),
+                    driver, capturedAt, jpeg, streamId));
+            return true;
+        }
+    }
+
+    private static boolean sameConfig(Camera expected, Camera current) {
+        return current != null && Objects.equals(expected.getVehicleId(), current.getVehicleId())
+                && Objects.equals(expected.getStreamUrl(), current.getStreamUrl())
+                && Objects.equals(expected.getSampleIntervalSeconds(), current.getSampleIntervalSeconds());
     }
 
     private synchronized void readerStopped(Capture capture, Process process) {
         if (capture.process == process) {
+            capture.failureReason = "STREAM_ENDED";
             retire(capture.camera.getId(), capture);
             scheduleRetry(capture);
         }
@@ -191,11 +267,21 @@ public class FfmpegManager {
 
     private static final class Capture {
         private final Camera camera;
+        private final Supplier<Camera> policy;
+        private final LongFunction<Long> currentDriver;
         private Process process;
+        private String streamId;
+        private Instant lastSuccessfulFrame;
+        private String failureReason;
+        private boolean receivedFrame;
         private long lastFrameAt;
         private long retryAt = System.nanoTime();
         private long delayMs;
 
-        private Capture(Camera camera) { this.camera = camera; }
+        private Capture(Camera camera, Supplier<Camera> policy, LongFunction<Long> currentDriver) {
+            this.camera = camera;
+            this.policy = policy;
+            this.currentDriver = currentDriver;
+        }
     }
 }
