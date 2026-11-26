@@ -69,5 +69,5 @@
 `GET /api/vehicles/{id}/track?startTime=1700000000000&endTime=1700000060000&page=1&pageSize=500`
 
 - `startTime` 和 `endTime` 是 Unix 毫秒，单次时间跨度最多 24 小时。每页 1 到 1000 点。超过 20,000 点时返回 422，请缩小时间范围。空轨迹返回 0 和空数组。
-- 点按 `sampledAt`、`driverId` 排序，包含司机、坐标、采样车速、`segment` 和 `distanceFromPreviousKm`。响应带全区间的 `totalPoints`、`totalDistanceKm`、`segmentCount`，里程包含跨页的有效相邻点。
-- 司机变化、同一时间戳、间隔超过 30 秒或相邻点推算速度超过 200 km/h 时另外起段。地图按 `segment` 绘制，里程用同段相邻点的 Haversine 距离累加。定位坐标保持 App 上报的坐标系，里程是 GPS 估算值。
+- 首页返回 `snapshotId`。查询后续页时传回该值，并沿用同一车辆、时间区间和分页大小。晚到样本会在下次新查询时纳入。点按 `sampledAt`、`driverId` 排序，包含司机、坐标、采样车速、`segment` 和 `distanceFromPreviousKm`。响应带全区间的 `totalPoints`、`totalDistanceKm`、`segmentCount`，里程包含跨页的有效相邻点。
+- 司机变化、同一时间戳、间隔超过 30 秒或相邻点推算速度超过 200 km/h 时另外起段。地图按 `segment` 绘制，里程用同段相邻点的 Haversine 距离累加。坐标按存储原值返回。每点的 `coordinateSystem` 为 `GCJ-02` 或 `UNKNOWN`。全区间来源不同时顶层为 `MIXED`，并在来源变化处另起一段。空轨迹的顶层坐标系为 `null`。里程是 GPS 估算值。

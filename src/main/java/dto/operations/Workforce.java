@@ -18,7 +18,7 @@ public final class Workforce {
     public record CursorPage<T>(List<T> records, boolean hasNext, Long nextCursor) { }
 
     public record ShiftRequest(@NotNull @Positive Long driverId, @NotNull LocalDate date, @NotNull ShiftType type,
-                               LocalDateTime startsAt, LocalDateTime endsAt) { }
+                               LocalDateTime startsAt, LocalDateTime endsAt, @NotNull @PositiveOrZero Long expectedVersion) { }
     public record Position(@NotNull @DecimalMin("-90") @DecimalMax("90") Double latitude,
                            @NotNull @DecimalMin("-180") @DecimalMax("180") Double longitude) { }
     public record Punch(@NotNull LocalDate shiftDate, @NotNull @jakarta.validation.Valid Position position) { }
@@ -30,7 +30,10 @@ public final class Workforce {
                               @NotNull LocalDateTime startsAt, @NotNull LocalDateTime endsAt) { }
 
     public record Shift(long id, long driverId, long fleetId, LocalDate shiftDate, ShiftType shiftType,
-                        LocalDateTime startsAt, LocalDateTime endsAt) { }
+                        LocalDateTime startsAt, LocalDateTime endsAt, long version) { }
+    public record ShiftRevision(long id, long shiftId, long version, long operatorId, LocalDateTime changedAt,
+                                ShiftType beforeType, LocalDateTime beforeStartsAt, LocalDateTime beforeEndsAt,
+                                ShiftType afterType, LocalDateTime afterStartsAt, LocalDateTime afterEndsAt) { }
     public record Attendance(long shiftId, LocalDateTime clockInAt, double clockInLat, double clockInLon,
                              LocalDateTime clockOutAt, Double clockOutLat, Double clockOutLon) { }
     public record ShiftAttendance(Shift shift, Attendance attendance) { }

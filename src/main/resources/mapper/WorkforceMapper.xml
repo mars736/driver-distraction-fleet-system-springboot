@@ -13,12 +13,12 @@
     </sql>
 
     <select id="shift" resultType="dto.operations.Workforce$Shift">
-        SELECT id, driver_id, fleet_id, shift_date, shift_type, starts_at, ends_at
+        SELECT id, driver_id, fleet_id, shift_date, shift_type, starts_at, ends_at, version
         FROM driver_shift WHERE driver_id=#{driverId} AND shift_date=#{date}
     </select>
 
     <select id="shifts" resultType="dto.operations.Workforce$Shift">
-        SELECT id, driver_id, fleet_id, shift_date, shift_type, starts_at, ends_at
+        SELECT id, driver_id, fleet_id, shift_date, shift_type, starts_at, ends_at, version
         FROM driver_shift WHERE driver_id=#{driverId} AND shift_date&gt;=#{start} AND shift_date&lt;#{end}
         ORDER BY shift_date
     </select>
@@ -28,11 +28,41 @@
             AND shift_date&lt;&gt;#{date} AND starts_at&lt;#{end} AND ends_at&gt;#{start})
     </select>
 
-    <insert id="saveShift">
+    <insert id="insertShift">
         INSERT INTO driver_shift(driver_id,fleet_id,shift_date,shift_type,starts_at,ends_at)
         VALUES(#{driverId},#{fleetId},#{date},#{type},#{start},#{end})
-        ON DUPLICATE KEY UPDATE fleet_id=#{fleetId},shift_type=#{type},starts_at=#{start},ends_at=#{end}
     </insert>
+
+    <update id="updateShift">
+        UPDATE driver_shift SET fleet_id=#{fleetId},shift_type=#{type},starts_at=#{start},ends_at=#{end},version=version+1
+        WHERE id=#{id} AND version=#{version}
+    </update>
+
+    <select id="restOverlapExcept" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM driver_shift WHERE driver_id=#{driverId} AND shift_type='REST'
+            AND shift_date&lt;&gt;#{date} AND shift_date&gt;=DATE(#{start}) AND CAST(shift_date AS DATETIME)&lt;#{end})
+    </select>
+
+    <select id="shiftById" resultType="dto.operations.Workforce$Shift">
+        SELECT id,driver_id,fleet_id,shift_date,shift_type,starts_at,ends_at,version FROM driver_shift WHERE id=#{id}
+    </select>
+
+    <insert id="recordShiftRevision">
+        INSERT INTO driver_shift_revision (shift_id,version,operator_id,changed_at,before_type,before_starts_at,
+            before_ends_at,after_type,after_starts_at,after_ends_at)
+        VALUES (#{after.id},#{after.version},#{actor},#{at},
+            <choose>
+                <when test="before != null">#{before.shiftType},#{before.startsAt},#{before.endsAt},</when>
+                <otherwise>NULL,NULL,NULL,</otherwise>
+            </choose>
+            #{after.shiftType},#{after.startsAt},#{after.endsAt})
+    </insert>
+
+    <select id="shiftRevisions" resultType="dto.operations.Workforce$ShiftRevision">
+        SELECT id,shift_id,version,operator_id,changed_at,before_type,before_starts_at,before_ends_at,
+               after_type,after_starts_at,after_ends_at
+        FROM driver_shift_revision WHERE shift_id=#{id} ORDER BY version
+    </select>
 
     <select id="attendance" resultType="dto.operations.Workforce$Attendance">
         SELECT shift_id,clock_in_at,clock_in_lat,clock_in_lon,clock_out_at,clock_out_lat,clock_out_lon
