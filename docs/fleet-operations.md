@@ -2,7 +2,7 @@
 
 ## 数据库升级
 
-已有第二批数据表的数据库执行 `src/main/resources/db/migrations/20261122_fleet_operations.sql`。新库运行完整 `schema.sql`。第三批新增十张运营表。已有运营表的数据库另执行 `src/main/resources/db/migrations/20261126_workforce_task_attendance.sql`。新接口使用现有 Bearer Token，业务时间统一为北京时间。列表默认第 1 页、每页 20 条，上限 100。
+已有第二批数据表的数据库执行 `src/main/resources/db/migrations/20261122_fleet_operations.sql`。新库运行完整 `schema.sql`。第三批新增十张运营表。已有运营表的数据库按顺序执行 `20261126_workforce_task_attendance.sql` 和 `20261126_fleet_care_certificates_fuel.sql`。新接口使用现有 Bearer Token，业务时间统一为北京时间。列表默认第 1 页、每页 20 条，上限 100。
 
 ## 排班打卡与运输任务
 
@@ -60,20 +60,37 @@
 | `GET /vehicles/{id}/odometer`、`PUT /vehicles/{id}/odometer` | 查询、录入最新里程表读数 |
 | `GET /vehicles/{id}/maintenance`、`POST /vehicles/{id}/maintenance` | 查询、新增周期保养计划 |
 | `POST /maintenance/{id}/complete` | 登记本周期保养完成并计算下次保养 |
+| `PATCH /maintenance/{id}/enabled?enabled=true` | 启停保养计划 |
 | `GET /vehicles/{id}/repairs`、`POST /vehicles/{id}/repairs` | 查看、新建维修单 |
 | `POST /repairs/{id}/transition` | 顺序流转维修单状态 |
+| `POST /repairs/{id}/acceptance-rejection`、`GET /repairs/{id}/history` | 验收退回、查看流转历史 |
 | `POST /vehicles/{id}/fuel`、`PUT /fuel/{id}` | 新增、修正加油记录 |
+| `POST /fuel/{id}/void`、`GET /fuel/{id}/revisions` | 作废加油记录、查看修正前后值 |
 | `GET /vehicles/{id}/fuel?start=2026-11-01&end=2026-12-01` | 分页查询油耗与同类车型基准 |
 
 - 里程示例 `{"odometerKm":15500.5,"measuredAt":"2026-11-22T12:00:00"}`。以人工核对的里程表读数判断里程保养。里程和时间不可倒退。
 - 保养计划示例 `{"name":"例行保养","intervalDays":90,"intervalKm":5000,"lastServiceDate":"2026-11-20","lastServiceOdometerKm":10000}`。按日期、按里程可分别使用，任一已到期即提示。如果同时设置两类周期，完成时提交日期和里程。完成示例 `{"cycle":1,"date":"2026-11-22","odometerKm":15500.5}`。客户端提交刚查询到的 `cycle`，重复提交旧周期返回 409。
 - 新建维修单填写 `description`（维修项目或故障说明）。维修单依次使用 `REPORTED → ASSIGNED → IN_REPAIR → DONE → ACCEPTED → SETTLED`。派工时正文填写 `assignee`，维修厂填 `shop`，结算时填写 `cost`（免费填 0）。
-- 加油示例 `{"fueledAt":"2026-11-22T11:00:00","liters":40.5,"unitPrice":7.25,"odometerKm":15400}`。金额按升数乘单价计算，保留两位小数。百公里油耗用本次加油量除以相邻里程表差值后乘 100。查询的第一条记录可以引用范围外的上一条加油记录。修改或补录历史记录后，查询会按加油时间重新确定相邻区间。
-- 同车队同车型的其他车辆在查询日期内至少有 3 个有效油耗区间时，取其平均值。高出均值 25% 标记 `ABNORMAL`。没有上一条、里程差值无效或同车型样本不足分别标记 `NO_PREVIOUS`、`ODOMETER_INVALID`、`INSUFFICIENT_PEERS`。阈值可用 `operations.fuel.deviation` 和 `operations.fuel.min-peer-samples` 配置。
+- 同车只允许一张未结算维修单。报修时可填写同车的 `maintenancePlanId`。
+  完工时可填 `completedOn` 和 `completedOdometerKm`。验收不通过提交 `reason`，
+  工单回到 `IN_REPAIR`，旧实绩和退回记录仍可在历史中查看。
+  验收通过后可用 `applyMaintenance: true` 和 `expectedCycle` 在结算事务中滚动关联保养计划。
+  选择更新时，计划须已启用，且原周期与数据库一致。已停用计划暂停生成提醒。
+- 加油示例 `{"fueledAt":"2026-11-22T11:00:00","liters":40.5,"unitPrice":7.25,"odometerKm":15400,"fillStatus":"FULL"}`。
+  `fillStatus` 为 `FULL`、`PARTIAL` 或 `UNKNOWN`，旧数据迁移为 `UNKNOWN`。
+  两笔已确认加满之间，累计上次加满之后到本次加满的油量，由本次记录的 `litersPer100Km` 展示正式油耗。
+  `intervalStart`、`intervalEnd` 和 `intervalLiters` 给出区间时间和累计油量，`previousOdometerKm`
+  和 `odometerKm` 给出两端读数。查询允许取开始日期之前的加满记录作起点。
+- `calculationStatus` 区分 `VALID`、`NO_PREVIOUS`、`PARTIAL`、`UNKNOWN_FILL`、
+  `UNKNOWN_IN_INTERVAL`、`ODOMETER_INVALID` 和 `VOIDED`。同车队同车型基准仅使用其他车辆
+  的有效加满区间。有效区间不足时返回 `INSUFFICIENT_PEERS`，该车的正式油耗仍可查看。
+  车型基准偏差和最少样本量仍使用 `operations.fuel.deviation` 与 `operations.fuel.min-peer-samples` 配置。
+- 修正与作废均提交当前记录的 `version` 作为 `expectedVersion`，以及非空 `reason`。
+  版本落后或记录已作废返回 409。查询时按最新有效记录重算。作废记录和变更历史保留，可在原时刻补录有效记录。
 
 ## 证照和期限提醒
 
-- 管理员用 `PUT /api/operations/certificates` 登记或续期，正文如 `{"subjectType":"VEHICLE","subjectId":11,"certificateType":"INSURANCE","expiresOn":"2026-12-20"}`。同一主体、同类证照更新原证照。车辆证照支持 `INSPECTION`、`INSURANCE`、`OPERATING_PERMIT`，司机证照支持 `DRIVER_LICENSE`、`DRIVER_QUALIFICATION`。
-- 查询指定主体证照用 `GET /api/operations/certificates?subjectType=VEHICLE&subjectId=11`。管理员用 `GET /api/operations/reminders?fleetId=1&sourceType=CERTIFICATE` 补查提醒，`sourceType` 可省略或设为 `MAINTENANCE`。
-- 默认每天北京时间 09:00 扫描。证照提前 30 天提醒，超过到期日进入过期阶段。保养提前 7 天或 500 km 提醒，到达目标日期或里程后进入到期阶段。相同到期日或保养周期的同阶段只生成一次，续期和保养完成后可产生新提醒。调试时可在本地配置 `operations.reminders.cron` 为 `*/10 * * * * *`，每 10 秒扫描一次。
+- 管理员用 `PUT /api/operations/certificates` 登记或续期，正文如 `{"subjectType":"VEHICLE","subjectId":11,"certificateType":"INSURANCE","expiresOn":"2026-12-20","expectedVersion":0}`。首次登记用 `expectedVersion: 0`。续期提交上一次读取的 `version`，成功后返回新版本并沿用证照 ID。旧版本返回 409。车辆证照支持 `INSPECTION`、`INSURANCE`、`OPERATING_PERMIT`，司机证照支持 `DRIVER_LICENSE`、`DRIVER_QUALIFICATION`。
+- 查询指定主体证照用 `GET /api/operations/certificates?subjectType=VEHICLE&subjectId=11`。管理员用 `GET /api/operations/reminders?fleetId=1&sourceType=CERTIFICATE` 补查提醒，`sourceType` 可省略或设为 `MAINTENANCE`。另可按 `sourceId`、`subjectType`、`subjectId`、`stage` 和 `createdFrom`、`createdTo` 筛选。生成时间用北京时间，结束时间排他。
+- 默认每天北京时间 09:00 扫描。证照提前 30 天提醒，今天到期为 `DUE`，早于今天为 `EXPIRED`，即将到期为 `DUE_SOON`。旧提醒保留当时的阶段。保养提前 7 天或 500 km 提醒，到达目标日期或里程后进入到期阶段。相同到期日或保养周期的同阶段只生成一次，续期和保养完成后可产生新提醒。调试时可在本地配置 `operations.reminders.cron` 为 `*/10 * * * * *`，每 10 秒扫描一次。
 - 新提醒提交后，在管理员的 `GET /api/alerts/stream` 连接收到 `event: operations-reminder`，包含提醒 ID、来源类型、主体和阶段。客户端用提醒列表读取完整日期或目标里程。所有运营写操作由统一操作日志记录。

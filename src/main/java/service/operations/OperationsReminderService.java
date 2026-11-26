@@ -43,7 +43,15 @@ public class OperationsReminderService {
         check(input.certificateType().subject() == input.subjectType(), 400, "证照类型与归属不符");
         check(input.expiresOn().getYear() >= 1000 && input.expiresOn().getYear() <= 9998, 400, "到期日无效");
         Long fleetId = subjectFleet(input.subjectType(), input.subjectId(), true);
-        mapper.saveCertificate(input, now());
+        var current = mapper.certificate(input);
+        var at = now();
+        if (current == null) {
+            check(input.expectedVersion() == 0, 409, "证照已新增或变更，请刷新");
+            mapper.insertCertificate(input, at);
+        } else {
+            check(current.version() == input.expectedVersion(), 409, "证照已新增或变更，请刷新");
+            check(mapper.renewCertificate(current.id(), input, at) == 1, 409, "证照已变更，请刷新");
+        }
         var result = mapper.certificate(input);
         audit.success(OperationAction.CERTIFICATE_SAVE, result.id(), fleetId, input.certificateType().name());
         return result;
@@ -55,10 +63,11 @@ public class OperationsReminderService {
         return mapper.certificates(type, id);
     }
 
-    public List<Reminder> reminders(Long fleetId, SourceType type, int page, int size) {
+    public List<Reminder> reminders(ReminderFilter filter, int page, int size) {
         admin();
-        check(fleetId == null || fleetId > 0, 400, "车队 ID 无效");
-        return mapper.reminders(fleetId, type, offset(page, size), size);
+        check(filter.createdFrom() == null || filter.createdTo() == null
+                || filter.createdFrom().isBefore(filter.createdTo()), 400, "提醒生成时间范围无效");
+        return mapper.reminders(filter, offset(page, size), size);
     }
 
     @Scheduled(cron = "${operations.reminders.cron:0 0 9 * * *}", zone = "Asia/Shanghai")

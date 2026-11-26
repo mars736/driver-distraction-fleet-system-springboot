@@ -389,6 +389,7 @@ CREATE TABLE IF NOT EXISTS vehicle_maintenance_plan (
     cycle INT NOT NULL DEFAULT 1,
     last_service_date DATE NULL,
     last_service_odometer_km DECIMAL(12,2) NULL,
+    enabled TINYINT(1) NOT NULL DEFAULT 1,
     KEY idx_maintenance_vehicle (vehicle_id, id)
 ) COMMENT '车辆周期保养计划';
 
@@ -403,6 +404,10 @@ CREATE TABLE IF NOT EXISTS vehicle_repair (
     created_by BIGINT NOT NULL,
     created_at DATETIME(3) NOT NULL,
     updated_at DATETIME(3) NOT NULL,
+    maintenance_plan_id BIGINT NULL,
+    completed_on DATE NULL,
+    completed_odometer_km DECIMAL(12,2) NULL,
+    maintenance_cycle_applied INT NULL,
     KEY idx_repair_vehicle (vehicle_id, id)
 ) COMMENT '车辆维修工单与费用';
 
@@ -414,8 +419,39 @@ CREATE TABLE IF NOT EXISTS fuel_record (
     unit_price DECIMAL(8,3) NOT NULL,
     amount DECIMAL(12,2) NOT NULL,
     odometer_km DECIMAL(12,2) NOT NULL,
-    UNIQUE KEY uk_vehicle_fuel_time (vehicle_id, fueled_at)
+    fill_status VARCHAR(8) NOT NULL DEFAULT 'UNKNOWN',
+    version BIGINT NOT NULL DEFAULT 1,
+    voided_at DATETIME(3) NULL,
+    active_marker TINYINT GENERATED ALWAYS AS (IF(voided_at IS NULL,1,NULL)) STORED,
+    UNIQUE KEY uk_vehicle_active_fuel_time (vehicle_id, fueled_at, active_marker)
 ) COMMENT '加油记录与里程表读数';
+
+CREATE TABLE IF NOT EXISTS vehicle_repair_event (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    repair_id BIGINT NOT NULL,
+    from_status VARCHAR(16) NULL,
+    to_status VARCHAR(16) NOT NULL,
+    reason VARCHAR(300) NULL,
+    operator_id BIGINT NOT NULL,
+    operated_at DATETIME(3) NOT NULL,
+    completed_on DATE NULL,
+    completed_odometer_km DECIMAL(12,2) NULL,
+    maintenance_cycle_applied INT NULL,
+    KEY idx_repair_event (repair_id,id)
+) COMMENT '维修工单状态与实绩历史';
+
+CREATE TABLE IF NOT EXISTS fuel_record_revision (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    fuel_id BIGINT NOT NULL,
+    version BIGINT NOT NULL,
+    action VARCHAR(12) NOT NULL,
+    operator_id BIGINT NOT NULL,
+    reason VARCHAR(300) NOT NULL,
+    before_json JSON NOT NULL,
+    after_json JSON NOT NULL,
+    operated_at DATETIME(3) NOT NULL,
+    UNIQUE KEY uk_fuel_revision (fuel_id,version)
+) COMMENT '加油修正和作废记录';
 
 CREATE TABLE IF NOT EXISTS operation_certificate (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -424,6 +460,7 @@ CREATE TABLE IF NOT EXISTS operation_certificate (
     certificate_type VARCHAR(24) NOT NULL,
     expires_on DATE NOT NULL,
     updated_at DATETIME(3) NOT NULL,
+    version BIGINT NOT NULL DEFAULT 1,
     UNIQUE KEY uk_operations_certificate (subject_type, subject_id, certificate_type),
     KEY idx_operations_certificate_due (expires_on, id)
 ) COMMENT '车辆和司机证照';

@@ -1,7 +1,8 @@
 package mapper;
 
 import dto.operations.FleetCare.*;
-import org.apache.ibatis.annotations.*;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -10,115 +11,96 @@ import java.util.List;
 
 @Mapper
 public interface FleetCareMapper {
-    @Select("SELECT vehicle_id,odometer_km,measured_at FROM vehicle_odometer WHERE vehicle_id=#{vehicleId}")
-    Odometer odometer(long vehicleId);
+    Odometer odometer(@Param("vehicleId") long vehicleId);
 
-    @Insert("""
-            INSERT INTO vehicle_odometer(vehicle_id,odometer_km,measured_at)
-            VALUES(#{id},#{input.odometerKm},#{input.measuredAt})
-            ON DUPLICATE KEY UPDATE odometer_km=#{input.odometerKm},measured_at=#{input.measuredAt}
-            """)
-    void saveOdometer(long id, OdometerRequest input);
+    void saveOdometer(@Param("id") long id, @Param("input") OdometerRequest input);
 
-    String PLAN = """
-            SELECT id,vehicle_id,name,interval_days,interval_km,next_date,next_odometer_km,cycle,
-                last_service_date,last_service_odometer_km FROM vehicle_maintenance_plan
-            """;
+    Plan plan(@Param("id") long id);
 
-    @Select(PLAN + " WHERE id=#{id}")
-    Plan plan(long id);
+    List<Plan> plans(@Param("vehicleId") long vehicleId, @Param("offset") long offset, @Param("size") int size);
 
-    @Select(PLAN + " WHERE vehicle_id=#{vehicleId} ORDER BY id DESC LIMIT #{size} OFFSET #{offset}")
-    List<Plan> plans(long vehicleId, long offset, int size);
+    void createPlan(@Param("vehicleId") long vehicleId,
+            @Param("input") PlanRequest input,
+            @Param("nextDate") LocalDate nextDate,
+            @Param("nextKm") BigDecimal nextKm);
 
-    @Insert("""
-            INSERT INTO vehicle_maintenance_plan(vehicle_id,name,interval_days,interval_km,next_date,next_odometer_km,
-                last_service_date,last_service_odometer_km)
-            VALUES(#{vehicleId},#{input.name},#{input.intervalDays},#{input.intervalKm},#{nextDate},#{nextKm},
-                #{input.lastServiceDate},#{input.lastServiceOdometerKm})
-            """)
-    void createPlan(long vehicleId, PlanRequest input, LocalDate nextDate, BigDecimal nextKm);
+    int completePlan(@Param("id") long id,
+            @Param("input") ServiceCompletion input,
+            @Param("nextDate") LocalDate nextDate,
+            @Param("nextKm") BigDecimal nextKm);
 
-    @Update("""
-            UPDATE vehicle_maintenance_plan SET next_date=#{nextDate},next_odometer_km=#{nextKm},cycle=cycle+1,
-                last_service_date=#{input.date},last_service_odometer_km=#{input.odometerKm}
-            WHERE id=#{id} AND cycle=#{input.cycle}
-            """)
-    int completePlan(long id, ServiceCompletion input, LocalDate nextDate, BigDecimal nextKm);
+    Repair repair(@Param("id") long id);
 
-    String REPAIR = """
-            SELECT id,vehicle_id,description,status,assignee,repair_shop,cost,created_by,created_at,updated_at FROM vehicle_repair
-            """;
+    List<Repair> repairs(@Param("vehicleId") long vehicleId,
+            @Param("status") RepairStatus status,
+            @Param("offset") long offset,
+            @Param("size") int size);
 
-    @Select(REPAIR + " WHERE id=#{id}")
-    Repair repair(long id);
+    void reportRepair(@Param("vehicleId") long vehicleId,
+            @Param("input") RepairRequest input,
+            @Param("actor") long actor,
+            @Param("now") LocalDateTime now);
 
-    @Select(REPAIR + """
-            WHERE vehicle_id=#{vehicleId} AND (#{status} IS NULL OR status=#{status})
-            ORDER BY id DESC LIMIT #{size} OFFSET #{offset}
-            """)
-    List<Repair> repairs(long vehicleId, RepairStatus status, long offset, int size);
+    int transitionRepair(@Param("id") long id,
+            @Param("expected") RepairStatus expected,
+            @Param("input") RepairTransition input,
+            @Param("now") LocalDateTime now,
+            @Param("appliedCycle") Integer appliedCycle);
 
-    @Insert("""
-            INSERT INTO vehicle_repair(vehicle_id,description,status,created_by,created_at,updated_at)
-            VALUES(#{vehicleId},#{description},'REPORTED',#{actor},#{now},#{now})
-            """)
-    void reportRepair(long vehicleId, String description, long actor, LocalDateTime now);
+    boolean fuelTimeExists(@Param("vehicle") long vehicle, @Param("at") LocalDateTime at, @Param("exceptId") long exceptId);
 
-    @Update("""
-            UPDATE vehicle_repair SET status=#{input.status},assignee=COALESCE(#{input.assignee},assignee),
-                repair_shop=COALESCE(#{input.shop},repair_shop),cost=COALESCE(#{input.cost},cost),updated_at=#{now}
-            WHERE id=#{id} AND status=#{expected}
-            """)
-    int transitionRepair(long id, RepairStatus expected, RepairTransition input, LocalDateTime now);
+    Long fuelVehicle(@Param("id") long id);
 
-    @Select("""
-            SELECT EXISTS(SELECT 1 FROM fuel_record WHERE vehicle_id=#{vehicle} AND fueled_at=#{at} AND id<>#{exceptId})
-            """)
-    boolean fuelTimeExists(long vehicle, LocalDateTime at, long exceptId);
+    void insertFuel(@Param("vehicleId") long vehicleId,
+            @Param("input") FuelRequest input,
+            @Param("amount") BigDecimal amount);
 
-    @Select("SELECT vehicle_id FROM fuel_record WHERE id=#{id}")
-    Long fuelVehicle(long id);
+    int updateFuel(@Param("id") long id,
+            @Param("vehicleId") long vehicleId,
+            @Param("input") FuelRequest input,
+            @Param("amount") BigDecimal amount);
 
-    @Insert("""
-            INSERT INTO fuel_record(vehicle_id,fueled_at,liters,unit_price,amount,odometer_km)
-            VALUES(#{vehicleId},#{input.fueledAt},#{input.liters},#{input.unitPrice},#{amount},#{input.odometerKm})
-            """)
-    void insertFuel(long vehicleId, FuelRequest input, BigDecimal amount);
+    boolean openRepairExists(@Param("vehicleId") long vehicleId);
 
-    @Update("""
-            UPDATE fuel_record SET fueled_at=#{input.fueledAt},liters=#{input.liters},unit_price=#{input.unitPrice},
-                amount=#{amount},odometer_km=#{input.odometerKm} WHERE id=#{id} AND vehicle_id=#{vehicleId}
-            """)
-    void updateFuel(long id, long vehicleId, FuelRequest input, BigDecimal amount);
+    int reopenRepair(@Param("id") long id, @Param("now") LocalDateTime now);
 
-    String RATE = """
-            CASE WHEN odometer_km > previous_odometer_km
-                THEN ROUND(liters * 100 / NULLIF(odometer_km - previous_odometer_km, 0), 4) ELSE NULL END
-            """;
+    void recordRepairEvent(@Param("from") RepairStatus from,
+            @Param("snapshot") Repair snapshot,
+            @Param("to") RepairStatus to,
+            @Param("reason") String reason,
+            @Param("actor") long actor,
+            @Param("at") LocalDateTime at);
 
-    @Select("""
-            WITH intervals AS (
-                SELECT f.*, LAG(odometer_km) OVER (ORDER BY fueled_at,id) AS previous_odometer_km
-                FROM fuel_record f WHERE vehicle_id=#{vehicleId} AND fueled_at<#{end}
-            )
-            SELECT id,vehicle_id,fueled_at,liters,unit_price,amount,odometer_km,previous_odometer_km,
-            """ + RATE + """
-              AS liters_per_100_km FROM intervals WHERE fueled_at>=#{start}
-              ORDER BY fueled_at DESC,id DESC LIMIT #{size} OFFSET #{offset}
-            """)
-    List<Fuel> fuel(long vehicleId, LocalDateTime start, LocalDateTime end, long offset, int size);
+    List<RepairEvent> repairEvents(@Param("id") long id);
 
-    @Select("""
-            WITH intervals AS (
-                SELECT f.*, LAG(odometer_km) OVER (PARTITION BY f.vehicle_id ORDER BY fueled_at,f.id) AS previous_odometer_km
-                FROM fuel_record f JOIN vehicle v ON v.id=f.vehicle_id
-                WHERE v.fleet_id=#{fleetId} AND v.vehicle_type=#{model} AND v.id<>#{vehicleId} AND f.fueled_at<#{end}
-            ), rates AS (SELECT
-            """ + RATE + """
-              AS value_per_100 FROM intervals WHERE fueled_at>=#{start}
-            )
-            SELECT COUNT(value_per_100) AS samples, AVG(value_per_100) AS average FROM rates
-            """)
-    PeerRate peerRate(long fleetId, String model, long vehicleId, LocalDateTime start, LocalDateTime end);
+    int setPlanEnabled(@Param("id") long id, @Param("enabled") boolean enabled);
+
+    FuelSnapshot fuelSnapshot(@Param("id") long id);
+
+    int voidFuel(@Param("id") long id,
+            @Param("expectedVersion") long expectedVersion,
+            @Param("now") LocalDateTime now);
+
+    void recordFuelRevision(@Param("id") long id,
+            @Param("version") long version,
+            @Param("action") String action,
+            @Param("actor") long actor,
+            @Param("reason") String reason,
+            @Param("before") String before,
+            @Param("after") String after,
+            @Param("now") LocalDateTime now);
+
+    List<FuelRevision> fuelRevisions(@Param("id") long id);
+
+    List<Fuel> fuel(@Param("vehicleId") long vehicleId,
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end,
+            @Param("offset") long offset,
+            @Param("size") int size);
+
+    PeerRate peerRate(@Param("fleetId") long fleetId,
+            @Param("model") String model,
+            @Param("vehicleId") long vehicleId,
+            @Param("start") LocalDateTime start,
+            @Param("end") LocalDateTime end);
 }

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.OperationsReminderMapper">
+
+
+    <insert id="insertCertificate">
+        INSERT INTO operation_certificate(subject_type,subject_id,certificate_type,expires_on,updated_at)
+        VALUES(#{input.subjectType},#{input.subjectId},#{input.certificateType},#{input.expiresOn},#{now})
+    </insert>
+
+    <select id="certificates" resultType="dto.operations.OperationsReminder$Certificate">
+        SELECT id,subject_type,subject_id,certificate_type,expires_on,updated_at,version FROM operation_certificate
+        WHERE subject_type=#{type} AND subject_id=#{id} ORDER BY certificate_type
+    </select>
+
+    <select id="certificate" resultType="dto.operations.OperationsReminder$Certificate" flushCache="true">
+        SELECT id,subject_type,subject_id,certificate_type,expires_on,updated_at,version FROM operation_certificate
+        WHERE subject_type=#{input.subjectType} AND subject_id=#{input.subjectId}
+          AND certificate_type=#{input.certificateType}
+    </select>
+
+    <select id="certificateCandidates" resultType="dto.operations.OperationsReminder$Candidate">
+        SELECT c.sourceType,c.sourceId,c.cycleKey,c.stage,c.fleetId,c.subjectType,c.subjectId,c.title,c.dueDate,c.dueOdometerKm
+        FROM (
+            SELECT 'CERTIFICATE' AS sourceType,b.id AS sourceId,CAST(b.expires_on AS CHAR) AS cycleKey,
+                CASE WHEN b.expires_on&lt;#{today} THEN 'EXPIRED'
+                          WHEN b.expires_on=#{today} THEN 'DUE' ELSE 'DUE_SOON' END AS stage,COALESCE(v.fleet_id,u.fleet_id) AS fleetId,
+                b.subject_type AS subjectType,b.subject_id AS subjectId,b.certificate_type AS title,
+                b.expires_on AS dueDate,CAST(NULL AS DECIMAL(12,2)) AS dueOdometerKm
+            FROM operation_certificate b
+            LEFT JOIN vehicle v ON b.subject_type='VEHICLE' AND v.id=b.subject_id
+            LEFT JOIN sys_user u ON b.subject_type='DRIVER' AND u.id=b.subject_id AND u.role='DRIVER'
+            WHERE b.expires_on&lt;=#{soon}
+        ) c
+        WHERE c.fleetId IS NOT NULL AND NOT EXISTS(
+            SELECT 1 FROM operation_reminder r WHERE r.source_type=c.sourceType AND r.source_id=c.sourceId
+            AND r.cycle_key=c.cycleKey AND r.stage=c.stage)
+        ORDER BY c.dueDate,c.sourceId LIMIT 200
+    </select>
+
+    <select id="maintenanceCandidates" resultType="dto.operations.OperationsReminder$Candidate">
+        SELECT c.sourceType,c.sourceId,c.cycleKey,c.stage,c.fleetId,c.subjectType,c.subjectId,c.title,c.dueDate,c.dueOdometerKm
+        FROM (
+            SELECT 'MAINTENANCE' AS sourceType,p.id AS sourceId,CAST(p.cycle AS CHAR) AS cycleKey,
+                IF(p.next_date&lt;=#{today} OR o.odometer_km&gt;=p.next_odometer_km,'DUE','DUE_SOON') AS stage,
+                v.fleet_id AS fleetId,'VEHICLE' AS subjectType,p.vehicle_id AS subjectId,p.name AS title,
+                p.next_date AS dueDate,p.next_odometer_km AS dueOdometerKm
+            FROM vehicle_maintenance_plan p JOIN vehicle v ON v.id=p.vehicle_id
+            LEFT JOIN vehicle_odometer o ON o.vehicle_id=p.vehicle_id
+            WHERE p.enabled=1 AND (p.next_date&lt;=#{soon} OR o.odometer_km+#{kmWindow}&gt;=p.next_odometer_km)
+        ) c WHERE NOT EXISTS(
+            SELECT 1 FROM operation_reminder r WHERE r.source_type=c.sourceType AND r.source_id=c.sourceId
+            AND r.cycle_key=c.cycleKey AND r.stage=c.stage)
+        ORDER BY c.sourceId LIMIT 200
+    </select>
+
+    <insert id="claim">
+        INSERT IGNORE INTO operation_reminder(source_type,source_id,cycle_key,stage,fleet_id,subject_type,
+            subject_id,title,due_date,due_odometer_km,created_at)
+        SELECT #{c.sourceType},#{c.sourceId},#{c.cycleKey},#{c.stage},#{c.fleetId},#{c.subjectType},
+            #{c.subjectId},#{c.title},#{c.dueDate},#{c.dueOdometerKm},#{now}
+        WHERE (#{c.sourceType}='CERTIFICATE' AND EXISTS(
+            SELECT 1 FROM operation_certificate WHERE id=#{c.sourceId} AND expires_on=#{c.dueDate}))
+          OR (#{c.sourceType}='MAINTENANCE' AND EXISTS(
+            SELECT 1 FROM vehicle_maintenance_plan WHERE id=#{c.sourceId} AND enabled=1 AND CAST(cycle AS CHAR)=#{c.cycleKey}))
+    </insert>
+
+    <select id="reminders" resultType="dto.operations.OperationsReminder$Reminder">
+        SELECT id,source_type,source_id,cycle_key,stage,fleet_id,subject_type,subject_id,title,due_date,due_odometer_km,created_at
+        FROM operation_reminder WHERE (#{filter.fleetId} IS NULL OR fleet_id=#{filter.fleetId})
+          AND (#{filter.sourceType} IS NULL OR source_type=#{filter.sourceType})
+          AND (#{filter.sourceId} IS NULL OR source_id=#{filter.sourceId})
+          AND (#{filter.subjectType} IS NULL OR subject_type=#{filter.subjectType})
+          AND (#{filter.subjectId} IS NULL OR subject_id=#{filter.subjectId})
+          AND (#{filter.stage} IS NULL OR stage=#{filter.stage})
+          AND (#{filter.createdFrom} IS NULL OR created_at&gt;=#{filter.createdFrom})
+          AND (#{filter.createdTo} IS NULL OR created_at&lt;#{filter.createdTo})
+        ORDER BY id DESC LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <update id="renewCertificate">
+        UPDATE operation_certificate SET expires_on=#{input.expiresOn},updated_at=#{now},version=version+1
+        WHERE id=#{id} AND version=#{input.expectedVersion}
+    </update>
+</mapper>

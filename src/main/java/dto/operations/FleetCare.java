@@ -1,5 +1,6 @@
 package dto.operations;
 
+import com.fasterxml.jackson.annotation.JsonRawValue;
 import jakarta.validation.constraints.*;
 
 import java.math.BigDecimal;
@@ -15,7 +16,11 @@ public final class FleetCare {
 
         public boolean follows(RepairStatus current) { return ordinal() == current.ordinal() + 1; }
     }
-    public enum FuelStatus { NORMAL, ABNORMAL, INSUFFICIENT_PEERS, ODOMETER_INVALID, NO_PREVIOUS }
+    public enum FillStatus { FULL, PARTIAL, UNKNOWN }
+    public enum FuelStatus {
+        NORMAL, ABNORMAL, INSUFFICIENT_PEERS, ODOMETER_INVALID, NO_PREVIOUS, PARTIAL, UNKNOWN_FILL, UNKNOWN_IN_INTERVAL, VOIDED
+    }
+    public enum FuelCalculation { VALID, ODOMETER_INVALID, NO_PREVIOUS, PARTIAL, UNKNOWN_FILL, UNKNOWN_IN_INTERVAL, VOIDED }
 
     public record OdometerRequest(@NotNull @DecimalMin("0") @Digits(integer = 10, fraction = 2) BigDecimal odometerKm,
                                   @NotNull LocalDateTime measuredAt) { }
@@ -29,21 +34,39 @@ public final class FleetCare {
                                     @DecimalMin("0") @Digits(integer = 10, fraction = 2) BigDecimal odometerKm) { }
     public record Plan(long id, long vehicleId, String name, Integer intervalDays, BigDecimal intervalKm,
                        LocalDate nextDate, BigDecimal nextOdometerKm, int cycle,
-                       LocalDate lastServiceDate, BigDecimal lastServiceOdometerKm) { }
+                       LocalDate lastServiceDate, BigDecimal lastServiceOdometerKm, boolean enabled) { }
 
-    public record RepairRequest(@NotBlank @Size(max = 500) String description) { }
+    public record RepairRequest(@NotBlank @Size(max = 500) String description, @Positive Long maintenancePlanId) { }
     public record RepairTransition(@NotNull RepairStatus status, @Size(max = 80) String assignee,
                                    @Size(max = 100) String shop,
-                                   @DecimalMin("0") @Digits(integer = 10, fraction = 2) BigDecimal cost) { }
+                                   @DecimalMin("0") @Digits(integer = 10, fraction = 2) BigDecimal cost,
+                                   LocalDate completedOn,
+                                   @DecimalMin("0") @Digits(integer = 10, fraction = 2) BigDecimal completedOdometerKm,
+                                   boolean applyMaintenance, @Positive Integer expectedCycle) { }
     public record Repair(long id, long vehicleId, String description, RepairStatus status, String assignee,
-                         String repairShop, BigDecimal cost, long createdBy, LocalDateTime createdAt, LocalDateTime updatedAt) { }
+                         String repairShop, BigDecimal cost, long createdBy, LocalDateTime createdAt, LocalDateTime updatedAt,
+                         Long maintenancePlanId, LocalDate completedOn, BigDecimal completedOdometerKm,
+                         Integer maintenanceCycleApplied) { }
+    public record RepairRejection(@NotBlank @Size(max = 300) String reason) { }
+    public record RepairEvent(long id, long repairId, RepairStatus fromStatus, RepairStatus toStatus, String reason,
+                              long operatorId, LocalDateTime operatedAt, LocalDate completedOn,
+                              BigDecimal completedOdometerKm, Integer maintenanceCycleApplied) { }
 
     public record FuelRequest(@NotNull LocalDateTime fueledAt,
                               @NotNull @DecimalMin("0.01") @Digits(integer = 7, fraction = 2) BigDecimal liters,
                               @NotNull @DecimalMin("0.001") @Digits(integer = 5, fraction = 3) BigDecimal unitPrice,
-                              @NotNull @DecimalMin("0") @Digits(integer = 10, fraction = 2) BigDecimal odometerKm) { }
+                              @NotNull @DecimalMin("0") @Digits(integer = 10, fraction = 2) BigDecimal odometerKm,
+                              @NotNull FillStatus fillStatus, @Positive Long expectedVersion, @Size(max = 300) String reason) { }
     public record Fuel(long id, long vehicleId, LocalDateTime fueledAt, BigDecimal liters, BigDecimal unitPrice,
-                       BigDecimal amount, BigDecimal odometerKm, BigDecimal previousOdometerKm, BigDecimal litersPer100Km) { }
+                       BigDecimal amount, BigDecimal odometerKm, BigDecimal previousOdometerKm, BigDecimal litersPer100Km,
+                       FillStatus fillStatus, long version, LocalDateTime voidedAt, FuelCalculation calculationStatus,
+                       LocalDateTime intervalStart, LocalDateTime intervalEnd, BigDecimal intervalLiters) { }
+    public record FuelSnapshot(long id, long vehicleId, LocalDateTime fueledAt, BigDecimal liters, BigDecimal unitPrice,
+                               BigDecimal amount, BigDecimal odometerKm, FillStatus fillStatus, long version,
+                               LocalDateTime voidedAt) { }
+    public record FuelVoid(@NotNull @Positive Long expectedVersion, @NotBlank @Size(max = 300) String reason) { }
+    public record FuelRevision(long id, long fuelId, long version, String action, long operatorId, String reason,
+                               @JsonRawValue String beforeJson, @JsonRawValue String afterJson, LocalDateTime operatedAt) { }
     public record FuelRow(Fuel record, FuelStatus status) { }
     public record PeerRate(long samples, BigDecimal average) { }
     public record FuelOverview(long vehicleId, BigDecimal peerAverage, long peerSamples, BigDecimal deviationThreshold,
