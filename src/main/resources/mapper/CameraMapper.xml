@@ -15,6 +15,10 @@
         SELECT * FROM camera WHERE id = #{id}
     </select>
 
+    <select id="countByVehicleId" resultType="int">
+        SELECT COUNT(*) FROM camera WHERE vehicle_id = #{vehicleId}
+    </select>
+
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO camera (vehicle_id, driver_id, stream_url, sample_interval_seconds, enabled)
         VALUES (#{vehicleId}, #{driverId}, #{streamUrl}, #{sampleIntervalSeconds}, #{enabled})

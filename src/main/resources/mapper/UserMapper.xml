@@ -19,6 +19,10 @@
         SELECT COUNT(*) FROM sys_user WHERE employee_no = #{employeeNo}
     </select>
 
+    <select id="listByVehicleId" resultType="entity.User">
+        SELECT * FROM sys_user WHERE vehicle_id = #{vehicleId}
+    </select>
+
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO sys_user
             (username, password, name, phone, fleet_id, employee_no, role, enabled, token_version, vehicle_id)

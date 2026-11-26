@@ -20,6 +20,8 @@ public interface UserMapper {
 
     int countByEmployeeNo(String employeeNo);
 
+    List<User> listByVehicleId(Long vehicleId);
+
     int insert(User user);
 
     int updatePassword(@Param("id") Long id,

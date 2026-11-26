@@ -435,3 +435,14 @@ CREATE TABLE IF NOT EXISTS dispatch_operator_location (
     longitude DOUBLE NOT NULL,
     reported_at DATETIME(3) NOT NULL
 ) COMMENT '平台管理员用于派发的最近位置';
+
+-- ==================== 车辆引用完整性外键（服务层校验之外的数据库兜底） ====================
+-- 注意：若现有数据存在悬空引用，执行下面 ALTER 前需先清理，否则会加外键失败。
+ALTER TABLE vehicle
+    ADD CONSTRAINT fk_vehicle_fleet FOREIGN KEY (fleet_id) REFERENCES fleet(id) ON DELETE RESTRICT;
+
+ALTER TABLE sys_user
+    ADD CONSTRAINT fk_sys_user_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicle(id) ON DELETE RESTRICT;
+
+ALTER TABLE camera
+    ADD CONSTRAINT fk_camera_vehicle FOREIGN KEY (vehicle_id) REFERENCES vehicle(id) ON DELETE RESTRICT;
