@@ -17,6 +17,7 @@ public class AppealRecord {
     private String reason;
     private String targetStatusBefore; // 提交时原记录的状态，方便对照后续复核结果。
     private AppealStatus status;
+    private String effectiveStatus;
     private String decisionReason;
     private Long reviewerId;
     private LocalDateTime reviewedAt;

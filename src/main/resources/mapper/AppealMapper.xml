@@ -9,8 +9,15 @@
         SELECT id FROM alert_record WHERE recognition_id=#{recognitionId} AND record_type IN ('SMS_ALERT','BACKLOG') LIMIT 1 FOR UPDATE
     </select>
     <select id="find" resultType="entity.AppealRecord">
-        SELECT * FROM alert_appeal WHERE id=#{id}
-        <if test="owner != null">AND driver_id=#{owner}</if>
+        SELECT p.*, CASE WHEN p.target_type='ALERT' THEN
+            CASE WHEN a.status='REVOKED' THEN 'REVOKED'
+                 WHEN a.status IN ('OPEN','CONFIRMED') THEN 'EFFECTIVE' END
+            ELSE <include refid="mapper.RecognitionQueryMapper.effectiveStatus"/> END AS effective_status
+        FROM alert_appeal p
+        LEFT JOIN alert_record a ON p.target_type='ALERT' AND a.id=p.target_id
+        LEFT JOIN recognition_record r ON p.target_type='RECOGNITION' AND r.id=p.target_id
+        WHERE p.id=#{id}
+        <if test="owner != null">AND p.driver_id=#{owner}</if>
     </select>
     <select id="lock" resultType="entity.AppealRecord">
         SELECT * FROM alert_appeal WHERE id=#{id} FOR UPDATE

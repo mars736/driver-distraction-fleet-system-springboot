@@ -55,3 +55,11 @@ Remove-Item Env:\DRIVER_FLEET_DB_TESTS
 `AlertReviewIntegrationTest` 使用真实 MySQL、MyBatis 和 JWT，验证确认/撤销、操作人快照、北京时间、状态筛选、司机读写权限、重复操作、两管理员并发竞争、历史写入故障回滚、未知速度非违规以及参数边界；测试创建并清理自己的业务数据，不调用真实短信或推理服务。
 
 本次验证结果：Java 21 下启用数据库集成测试，全量 109 项通过，0 失败、0 错误、0 跳过，其中处理接口测试 19 项。415/406 两项边界测试在修复前失败、修复后通过，同时保留存储故障返回 500 和事务回滚测试。测试结束后核对夹具清理及处理历史无孤立记录。
+
+
+## 直接复核的冲突响应
+
+管理员的告警详情包含可为空的 `pendingAppealId`。直接复核冲突仍使用 HTTP 409，
+响应体的 `data.reason` 为 `PENDING_APPEAL` 或 `ALREADY_REVIEWED`。
+收到 `PENDING_APPEAL` 时可以使用 `data.pendingAppealId` 打开申诉。
+两种冲突都应刷新详情再决定下一步操作。

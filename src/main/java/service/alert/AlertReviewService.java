@@ -53,15 +53,18 @@ public class AlertReviewService {
         // 行锁串行化同一告警的并发处理；状态和操作历史必须在一个事务中提交。
         var alert = mapper.lockAlert(id);
         if (alert == null) { throw new BusinessException(404, "告警不存在"); }
-        if (appealMapper.pendingForAlert(id) != null) {
-            // 有申诉时走统一复核流程，不能在这里先改掉告警，留下未结束的申诉。
-            throw new BusinessException(409, "该告警有待复核申诉，请通过申诉入口处理");
+        Long pendingAppealId = appealMapper.pendingForAlert(id);
+        if (pendingAppealId != null) {
+            throw new AlertReviewConflict(AlertReviewConflict.Reason.PENDING_APPEAL,
+                    pendingAppealId, "该告警有待复核申诉，请通过申诉入口处理");
         }
         if (!AlertStatus.OPEN.name().equals(alert.getStatus())) {
-            throw new BusinessException(409, "告警已处理，请刷新后查看结果");
+            throw new AlertReviewConflict(AlertReviewConflict.Reason.ALREADY_REVIEWED,
+                    null, "告警已处理，请刷新后查看结果");
         }
         if (mapper.updateOpenStatus(id, request.getStatus().name()) != 1) {
-            throw new BusinessException(409, "告警状态已变更，请刷新后重试");
+            throw new AlertReviewConflict(AlertReviewConflict.Reason.ALREADY_REVIEWED,
+                    null, "告警状态已变更，请刷新后查看结果");
         }
         var record = new AlertReviewRecord();
         record.setAlertId(id);
@@ -75,7 +78,8 @@ public class AlertReviewService {
         if (mapper.insertReview(record) != 1) { throw new IllegalStateException("告警处理记录保存失败"); }
         audit.success(OperationAction.ALERT_REVIEW, id, alert.getFleetId(), request.getStatus().name());
         if (request.getStatus() == AlertStatus.REVOKED) {
-            events.publishEvent(new AlertRevokedEvent(id, alert.getFleetId()));
+            events.publishEvent(new AlertRevokedEvent(id, alert.getFleetId(), record.getId(),
+                    AlertRevokedEvent.Source.DIRECT_REVIEW, record.getOperatedAt()));
         }
         return record;
     }

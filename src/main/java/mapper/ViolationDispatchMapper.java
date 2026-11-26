@@ -11,7 +11,9 @@ import java.util.List;
 @Mapper
 public interface ViolationDispatchMapper {
     void createFromAlert(@Param("alertId") long alertId);
-    int cancelForAlert(@Param("alertId") long alertId);
+    int applyRevocation(service.alert.live.AlertRevokedEvent event);
+    int closeRevoked(@Param("id") long id, @Param("actor") long actor,
+                     @Param("input") RevocationWrapup input, @Param("now") LocalDateTime now);
     Long alertId(@Param("id") long id);
     WorkOrder detail(@Param("id") long id);
     List<WorkOrder> list(@Param("fleetId") Long fleetId, @Param("driverId") Long driverId,

@@ -6,6 +6,8 @@ import com.mars736.driverdistractionfleetsystemspringboot.DriverDistractionFleet
 import common.util.JwtUtil;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,6 +26,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
@@ -168,6 +171,105 @@ class ViolationDispatchIntegrationTest {
         assertThat(updated.path("recommendationAction").asText()).isEqualTo("TRAINING");
         assertThat(call(HttpMethod.GET, suggestionPath, admin, null, 200).path("eligible").asBoolean()).isFalse();
         assertThat(score()).isGreaterThan(before);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void revocationCancelsUnstartedOrdersAndRequiresWrapupForStartedOrders(boolean appeal) throws Exception {
+        for (String state : List.of("PENDING", "ASSIGNED", "IN_PROGRESS", "CLOSED")) {
+            long alert = alert("BACKLOG", "c5", false);
+            long workOrder = id(listFor(alert));
+            String path = order(workOrder);
+            if (!state.equals("PENDING")) {
+                call(HttpMethod.POST, path + "/assign", admin, Map.of("assigneeId", admin), 200);
+            }
+            if (state.equals("IN_PROGRESS") || state.equals("CLOSED")) {
+                call(HttpMethod.POST, path + "/start", admin, null, 200);
+            }
+            if (state.equals("CLOSED")) {
+                call(HttpMethod.POST, path + "/close", admin, Map.of("outcome", "HANDLED", "resolution", "原结论"), 200);
+            }
+            var before = call(HttpMethod.GET, path, admin, null, 200);
+            if (appeal) {
+                long appealId = id(call(HttpMethod.POST, "/api/appeals", driver,
+                        Map.of("targetType", "ALERT", "targetId", alert, "reason", "请复查"), 200));
+                call(HttpMethod.POST, "/api/appeals/" + appealId + "/decision", admin,
+                        Map.of("status", "REVOKED", "reason", "复查撤销"), 200);
+            } else {
+                review(alert, "REVOKED");
+            }
+
+            var updated = call(HttpMethod.GET, path, admin, null, 200);
+            assertThat(updated.path("alertStatus").asText()).isEqualTo("REVOKED");
+            if (state.equals("CLOSED")) {
+                assertThat(updated.path("outcome").asText()).isEqualTo("HANDLED");
+                assertThat(updated.path("resolution").asText()).isEqualTo("原结论");
+                assertThat(updated.path("closedAt")).isEqualTo(before.path("closedAt"));
+                continue;
+            }
+            assertThat(updated.path("revocationSource").asText()).isEqualTo(appeal ? "APPEAL" : "DIRECT_REVIEW");
+            assertThat(updated.path("revokedAt").isTextual()).isTrue();
+            assertThat(updated.path("revocationReviewId").asLong()).isEqualTo(jdbc.queryForObject(
+                    "SELECT id FROM alert_review_record WHERE alert_id=? AND to_status='REVOKED'", Long.class, alert));
+            if (!state.equals("IN_PROGRESS")) {
+                assertThat(updated.path("status").asText()).isEqualTo("CANCELED");
+                call(HttpMethod.POST, path + "/start", admin, null, 409);
+                continue;
+            }
+
+            assertThat(updated.path("status").asText()).isEqualTo("REVOKE_WRAPUP");
+            call(HttpMethod.POST, path + "/assign", admin, Map.of("assigneeId", otherAdmin), 409);
+            call(HttpMethod.POST, path + "/close", admin, Map.of("outcome", "HANDLED", "resolution", "结案"), 409);
+            call(HttpMethod.POST, path + "/personnel-recommendation", admin,
+                    Map.of("action", "TRAINING", "note", "安排培训"), 409);
+            var notes = Map.of("workDone", "已完成沟通", "resolution", "按撤销结论停止处置");
+            call(HttpMethod.POST, path + "/revocation-wrapup", driver, notes, 403);
+            call(HttpMethod.POST, path + "/revocation-wrapup", admin, Map.of("workDone", " "), 400);
+            var closed = call(HttpMethod.POST, path + "/revocation-wrapup", otherAdmin, notes, 200);
+            assertThat(closed.path("status").asText()).isEqualTo("CLOSED");
+            assertThat(closed.path("outcome").asText()).isEqualTo("REVOKED_WRAPUP");
+            assertThat(closed.path("wrapupWorkDone").asText()).isEqualTo("已完成沟通");
+            assertThat(closed.path("closedBy").asLong()).isEqualTo(otherAdmin);
+            assertThat(closed.path("assigneeId").asLong()).isEqualTo(admin);
+            assertThat(closed.path("startedAt")).isEqualTo(before.path("startedAt"));
+            call(HttpMethod.POST, path + "/revocation-wrapup", admin, notes, 409);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void concurrentRevocationSerializesWithStartOrClose(boolean closing) throws Exception {
+        long alert = alert("BACKLOG", "c5", false);
+        String path = order(id(listFor(alert)));
+        call(HttpMethod.POST, path + "/assign", admin, Map.of("assigneeId", admin), 200);
+        if (closing) { call(HttpMethod.POST, path + "/start", admin, null, 200); }
+        var ready = new CountDownLatch(1);
+        int result;
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var revocation = pool.submit(() -> { ready.await(); review(alert, "REVOKED"); return true; });
+            var operation = pool.submit(() -> {
+                ready.await();
+                var request = request(HttpMethod.POST, path + (closing ? "/close" : "/start"))
+                        .header("Authorization", "Bearer " + jwt.generateToken(otherAdmin, 0));
+                if (closing) {
+                    request.contentType(MediaType.APPLICATION_JSON)
+                            .content(json.writeValueAsBytes(Map.of("outcome", "HANDLED", "resolution", "原结论")));
+                }
+                return mvc.perform(request).andReturn().getResponse().getStatus();
+            });
+            ready.countDown();
+            result = operation.get(10, TimeUnit.SECONDS);
+            assertThat(revocation.get(10, TimeUnit.SECONDS)).isTrue();
+        }
+        assertThat(result).isIn(200, 409);
+        var order = call(HttpMethod.GET, path, admin, null, 200);
+        String expected = result == 200 ? (closing ? "CLOSED" : "REVOKE_WRAPUP")
+                : (closing ? "REVOKE_WRAPUP" : "CANCELED");
+        assertThat(order.path("status").asText()).isEqualTo(expected);
+        if (expected.equals("REVOKE_WRAPUP")) {
+            call(HttpMethod.POST, path + "/revocation-wrapup", admin,
+                    Map.of("workDone", "已记录", "resolution", "撤销收尾"), 200);
+        }
     }
 
     private int score() throws Exception {

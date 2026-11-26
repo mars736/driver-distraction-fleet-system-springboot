@@ -15,5 +15,8 @@ public class AppealMaterial {
     @JsonIgnore private String relativePath;
     private Long uploadedBy;
     private LocalDateTime uploadedAt;
+    private Availability availability;
+
+    public enum Availability { AVAILABLE, UNAVAILABLE }
     public String getDownloadUrl() { return "/api/appeals/" + appealId + "/materials/" + id; }
 }

@@ -19,11 +19,14 @@
         INSERT INTO recognition_record
         (source_key, source_frame_id, camera_id, vehicle_id, driver_id, fleet_id, captured_at,
          pred, behavior_code, max_p, energy, knn_dist, ood, participated, decision_reason,
-         speed_kmh, speed_status, key_frame_path)
+         speed_kmh, speed_status, key_frame_path, names_captured, plate_no_snapshot, driver_name_snapshot, fleet_name_snapshot)
         VALUES
         (#{sourceKey}, #{sourceFrameId}, #{cameraId}, #{vehicleId}, #{driverId}, #{fleetId}, #{capturedAt},
          #{pred}, #{behaviorCode}, #{maxP}, #{energy}, #{knnDist}, #{ood}, #{participated}, #{decisionReason},
-         #{speedKmh}, #{speedStatus}, #{keyFramePath})
+         #{speedKmh}, #{speedStatus}, #{keyFramePath}, 1,
+         (SELECT plate_no FROM vehicle WHERE id=#{vehicleId}),
+         (SELECT name FROM sys_user WHERE id=#{driverId}),
+         (SELECT name FROM fleet WHERE id=#{fleetId}))
     </insert>
     <insert id="insertAlert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO alert_record

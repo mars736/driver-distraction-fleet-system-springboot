@@ -78,7 +78,12 @@ public class AppealService {
     }
 
     public List<AppealEvent> events(long id) { detail(id); return mapper.events(id); }
-    public List<AppealMaterial> materials(long id) { detail(id); return mapper.materials(id); }
+    public List<AppealMaterial> materials(long id) {
+        detail(id);
+        var materials = mapper.materials(id);
+        materials.forEach(material -> material.setAvailability(materialStore.availability(material)));
+        return materials;
+    }
     public AppealMaterial material(long id, long materialId) {
         detail(id);
         var material = mapper.material(id, materialId);
@@ -139,9 +144,6 @@ public class AppealService {
             // CONFIRMED→CONFIRMED 也是一次复核，MySQL 可能报告 0 个实际变更行。
             if (!alert.getStatus().equals(request.getStatus().name())) {
                 requireWrite(reviewMapper.updateReviewableStatus(alert.getId(), request.getStatus().name()));
-                if (request.getStatus() == AlertStatus.REVOKED) {
-                    events.publishEvent(new AlertRevokedEvent(alert.getId(), alert.getFleetId()));
-                }
             }
             var review = new AlertReviewRecord();
             review.setAlertId(alert.getId()); review.setFromStatus(alert.getStatus()); review.setToStatus(request.getStatus().name());
@@ -154,7 +156,12 @@ public class AppealService {
         appeal.setReviewerId(actor.getId()); appeal.setReviewedAt(now()); appeal.setUpdateTime(appeal.getReviewedAt());
         requireWrite(mapper.finish(appeal));
         event(appeal, actor, appeal.getStatus().name(), reason, reviewId, null);
+        appeal.setEffectiveStatus(request.getStatus() == AlertStatus.REVOKED ? "REVOKED" : "EFFECTIVE");
         audit.success(OperationAction.APPEAL_DECIDE, id, appeal.getFleetId(), appeal.getStatus().name());
+        if (reviewId != null && request.getStatus() == AlertStatus.REVOKED) {
+            events.publishEvent(new AlertRevokedEvent(appeal.getTargetId(), appeal.getFleetId(), reviewId,
+                    AlertRevokedEvent.Source.APPEAL, appeal.getReviewedAt()));
+        }
         return appeal;
     }
 

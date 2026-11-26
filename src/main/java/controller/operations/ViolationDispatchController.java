@@ -54,6 +54,11 @@ public class ViolationDispatchController {
         return Result.success(service.close(id, input));
     }
 
+    @PostMapping("/orders/{id}/revocation-wrapup")
+    public Result<WorkOrder> wrapUpRevocation(@PathVariable long id, @Valid @RequestBody RevocationWrapup input) {
+        return Result.success(service.wrapUpRevocation(id, input));
+    }
+
     @GetMapping("/orders/{id}/personnel-recommendation")
     public Result<Recommendation> recommendation(@PathVariable long id) { return Result.success(service.recommendation(id)); }
 
