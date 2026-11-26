@@ -41,6 +41,11 @@ public class FleetCareController {
         return Result.success(service.completePlan(id, request));
     }
 
+    @PatchMapping("/maintenance/{id}/enabled")
+    public Result<Plan> setPlanEnabled(@PathVariable long id, @RequestParam boolean enabled) {
+        return Result.success(service.setPlanEnabled(id, enabled));
+    }
+
     @PostMapping("/vehicles/{id}/repairs")
     public Result<Repair> repair(@PathVariable long id, @Valid @RequestBody RepairRequest request) {
         return Result.success(service.reportRepair(id, request));
@@ -57,6 +62,16 @@ public class FleetCareController {
         return Result.success(service.transitionRepair(id, request));
     }
 
+    @PostMapping("/repairs/{id}/acceptance-rejection")
+    public Result<Repair> rejectAcceptance(@PathVariable long id, @Valid @RequestBody RepairRejection request) {
+        return Result.success(service.rejectAcceptance(id, request));
+    }
+
+    @GetMapping("/repairs/{id}/history")
+    public Result<List<RepairEvent>> repairHistory(@PathVariable long id) {
+        return Result.success(service.repairHistory(id));
+    }
+
     @PostMapping("/vehicles/{id}/fuel")
     public Result<Long> createFuel(@PathVariable long id, @Valid @RequestBody FuelRequest request) {
         return Result.success(service.createFuel(id, request));
@@ -65,6 +80,16 @@ public class FleetCareController {
     @PutMapping("/fuel/{id}")
     public Result<Long> updateFuel(@PathVariable long id, @Valid @RequestBody FuelRequest request) {
         return Result.success(service.updateFuel(id, request));
+    }
+
+    @PostMapping("/fuel/{id}/void")
+    public Result<Long> voidFuel(@PathVariable long id, @Valid @RequestBody FuelVoid request) {
+        return Result.success(service.voidFuel(id, request));
+    }
+
+    @GetMapping("/fuel/{id}/revisions")
+    public Result<List<FuelRevision>> fuelHistory(@PathVariable long id) {
+        return Result.success(service.fuelHistory(id));
     }
 
     @GetMapping("/vehicles/{id}/fuel")

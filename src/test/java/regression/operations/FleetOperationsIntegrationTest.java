@@ -71,6 +71,10 @@ class FleetOperationsIntegrationTest {
     @AfterEach
     void cleanup() {
         jdbc.update("DELETE FROM operation_reminder WHERE fleet_id=?", fleet);
+        jdbc.update("DELETE e FROM vehicle_repair_event e JOIN vehicle_repair r ON r.id=e.repair_id "
+                + "JOIN vehicle v ON v.id=r.vehicle_id WHERE v.fleet_id=?", fleet);
+        jdbc.update("DELETE e FROM fuel_record_revision e JOIN fuel_record f ON f.id=e.fuel_id "
+                + "JOIN vehicle v ON v.id=f.vehicle_id WHERE v.fleet_id=?", fleet);
         jdbc.update("DELETE c FROM operation_certificate c JOIN vehicle v ON v.id=c.subject_id WHERE c.subject_type='VEHICLE' AND v.fleet_id=?", fleet);
         jdbc.update("DELETE c FROM operation_certificate c JOIN sys_user u ON u.id=c.subject_id WHERE c.subject_type='DRIVER' AND u.fleet_id=?", fleet);
         for (String table : List.of("vehicle_odometer", "vehicle_maintenance_plan", "vehicle_repair", "fuel_record")) {
@@ -409,7 +413,7 @@ class FleetOperationsIntegrationTest {
         call(HttpMethod.PUT, path + "/odometer", admin, Map.of("odometerKm", 1500, "measuredAt", now.minusMinutes(1)), 409);
         long plan = id(call(HttpMethod.POST, path + "/maintenance", admin,
                 Map.of("name", "更换滤芯", "intervalKm", 500, "lastServiceOdometerKm", 1000), 200));
-        long certificate = id(certificate(today.minusDays(1)));
+        long certificate = id(certificate(today.minusDays(1), 0));
         reminders.scan();
         reminders.scan();
         var history = call(HttpMethod.GET, OPS + "/reminders?fleetId=" + fleet, admin, null, 200);
@@ -423,7 +427,7 @@ class FleetOperationsIntegrationTest {
         assertThat(completed.path("cycle").asInt()).isEqualTo(2);
         assertThat(completed.path("nextOdometerKm").asDouble()).isEqualTo(2010);
         call(HttpMethod.POST, CARE + "/maintenance/" + plan + "/complete", admin, Map.of("cycle", 1, "odometerKm", 1510), 409);
-        assertThat(id(certificate(today.plusDays(5)))).isEqualTo(certificate);
+        assertThat(id(certificate(today.plusDays(5), 1))).isEqualTo(certificate);
 
         reminders.scan();
         reminders.scan();
@@ -466,17 +470,166 @@ class FleetOperationsIntegrationTest {
         assertThat(view.path("rows").get(0).path("status").asText()).isEqualTo("ABNORMAL");
         assertThat(view.path("rows").get(0).path("record").path("litersPer100Km").asDouble()).isEqualTo(20);
 
-        call(HttpMethod.PUT, CARE + "/fuel/" + previous, admin, fuelBody(start.atTime(9, 0), 15, 900), 200);
+        call(HttpMethod.PUT, CARE + "/fuel/" + previous, admin, fuelCorrection(start.atTime(9, 0), 15, 900, "FULL", 1), 200);
         view = call(HttpMethod.GET, query, admin, null, 200);
         assertThat(view.path("rows").get(0).path("status").asText()).isEqualTo("NORMAL");
-        call(HttpMethod.PUT, CARE + "/fuel/" + previous, admin, fuelBody(start.atTime(9, 0), 15, 1100), 200);
+        call(HttpMethod.PUT, CARE + "/fuel/" + previous, admin, fuelCorrection(start.atTime(9, 0), 15, 1100, "FULL", 2), 200);
         view = call(HttpMethod.GET, query, admin, null, 200);
         assertThat(view.path("rows").get(0).path("status").asText()).isEqualTo("ODOMETER_INVALID");
     }
 
-    private JsonNode certificate(LocalDate expiry) throws Exception {
-        return call(HttpMethod.PUT, OPS + "/certificates", admin, Map.of("subjectType", "VEHICLE", "subjectId", vehicle,
-                "certificateType", "INSURANCE", "expiresOn", expiry), 200);
+    @Test
+    void fullTankIntervalsHandlePartialUnknownCorrectionsAndVoids() throws Exception {
+        var start = today.minusDays(6).atTime(9, 0);
+        long opening = fuel(vehicle, start, 40, 1000, "FULL");
+        long middle = fuel(vehicle, start.plusDays(1), 20, 1100, "PARTIAL");
+        long closing = fuel(vehicle, start.plusDays(2), 30, 1200, "FULL");
+        long unknown = fuel(vehicle, start.plusDays(3), 10, 1250, "UNKNOWN");
+        long nextFull = fuel(vehicle, start.plusDays(4), 25, 1300, "FULL");
+        String all = CARE + "/vehicles/" + vehicle + "/fuel?start=" + start.toLocalDate() + "&end=" + today;
+        var rows = call(HttpMethod.GET, all, admin, null, 200).path("rows");
+        assertThat(fuelRow(rows, opening).path("status").asText()).isEqualTo("NO_PREVIOUS");
+        assertThat(fuelRow(rows, middle).path("status").asText()).isEqualTo("PARTIAL");
+        assertThat(fuelRow(rows, middle).path("record").path("litersPer100Km").isNull()).isTrue();
+        assertThat(fuelRow(rows, unknown).path("status").asText()).isEqualTo("UNKNOWN_FILL");
+        assertThat(fuelRow(rows, nextFull).path("status").asText()).isEqualTo("UNKNOWN_IN_INTERVAL");
+        var interval = fuelRow(rows, closing).path("record");
+        assertThat(interval.path("litersPer100Km").asDouble()).isEqualTo(25);
+        assertThat(interval.path("intervalLiters").asDouble()).isEqualTo(50);
+        assertThat(interval.path("previousOdometerKm").asDouble()).isEqualTo(1000);
+        assertThat(LocalDateTime.parse(interval.path("intervalStart").asText())).isEqualTo(start);
+        assertThat(LocalDateTime.parse(interval.path("intervalEnd").asText())).isEqualTo(start.plusDays(2));
+
+        String query = CARE + "/vehicles/" + vehicle + "/fuel?start=" + start.plusDays(2).toLocalDate() + "&end=" + today;
+        assertThat(fuelRow(call(HttpMethod.GET, query, admin, null, 200).path("rows"), closing)
+                .path("record").path("litersPer100Km").asDouble()).isEqualTo(25);
+        String edit = CARE + "/fuel/" + middle;
+        var correction = fuelCorrection(start.plusDays(1), 10, 1100, "PARTIAL", 1);
+        call(HttpMethod.PUT, edit, admin, correction, 200);
+        call(HttpMethod.PUT, edit, admin, correction, 409);
+        assertThat(fuelRow(call(HttpMethod.GET, query, admin, null, 200).path("rows"), closing)
+                .path("record").path("litersPer100Km").asDouble()).isEqualTo(20);
+        call(HttpMethod.POST, edit + "/void", admin, Map.of("reason", "票据作废", "expectedVersion", 2), 200);
+        call(HttpMethod.POST, edit + "/void", admin, Map.of("reason", "重复作废", "expectedVersion", 2), 409);
+        assertThat(fuelRow(call(HttpMethod.GET, query, admin, null, 200).path("rows"), closing)
+                .path("record").path("litersPer100Km").asDouble()).isEqualTo(15);
+        fuel(vehicle, start.plusDays(1), 20, 1100, "PARTIAL");
+        assertThat(fuelRow(call(HttpMethod.GET, query, admin, null, 200).path("rows"), closing)
+                .path("record").path("litersPer100Km").asDouble()).isEqualTo(25);
+
+        var revisions = call(HttpMethod.GET, edit + "/revisions", admin, null, 200);
+        assertThat(revisions).hasSize(2);
+        assertThat(revisions.get(0).path("beforeJson").path("liters").asDouble()).isEqualTo(20);
+        assertThat(revisions.get(0).path("afterJson").path("liters").asDouble()).isEqualTo(10);
+        assertThat(revisions.get(1).path("action").asText()).isEqualTo("VOIDED");
+        assertThat(revisions.get(1).path("operatorId").asLong()).isEqualTo(admin);
+        assertThat(revisions.get(1).path("reason").asText()).isEqualTo("票据作废");
+
+        call(HttpMethod.PUT, CARE + "/fuel/" + unknown, admin,
+                fuelCorrection(start.plusDays(3), 10, 1250, "PARTIAL", 1), 200);
+        assertThat(fuelRow(call(HttpMethod.GET, query, admin, null, 200).path("rows"), nextFull)
+                .path("record").path("litersPer100Km").asDouble()).isEqualTo(35);
+    }
+
+    @Test
+    void concurrentRepairRejectionAndSettlementKeepHistoryAndAdvancePlanOnce() throws Exception {
+        String vehiclePath = CARE + "/vehicles/" + vehicle;
+        long otherAdmin = user("o2", "PLATFORM_ADMIN", null);
+        long other = vehicle("b");
+        var planRequest = Map.of("name", "制动保养", "intervalKm", 500, "lastServiceOdometerKm", 1000);
+        long plan = id(call(HttpMethod.POST, vehiclePath + "/maintenance", admin, planRequest, 200));
+        long otherPlan = id(call(HttpMethod.POST, CARE + "/vehicles/" + other + "/maintenance", admin, planRequest, 200));
+        call(HttpMethod.POST, vehiclePath + "/repairs", admin,
+                Map.of("description", "异车计划", "maintenancePlanId", otherPlan), 409);
+        var report = Map.of("description", "制动维修", "maintenancePlanId", plan);
+        race(() -> rawStatus(HttpMethod.POST, vehiclePath + "/repairs", admin, report),
+                () -> rawStatus(HttpMethod.POST, vehiclePath + "/repairs", otherAdmin, report));
+        var repairs = call(HttpMethod.GET, vehiclePath + "/repairs", admin, null, 200);
+        assertThat(repairs).hasSize(1);
+        long repair = id(repairs.get(0));
+        String path = CARE + "/repairs/" + repair;
+        String transition = path + "/transition";
+        call(HttpMethod.POST, transition, admin, Map.of("status", "ASSIGNED", "assignee", "维修组"), 200);
+        call(HttpMethod.POST, transition, admin, Map.of("status", "IN_REPAIR"), 200);
+        call(HttpMethod.POST, transition, admin, Map.of("status", "DONE", "completedOn", today,
+                "completedOdometerKm", 1500), 200);
+        String rejection = path + "/acceptance-rejection";
+        call(HttpMethod.POST, rejection, admin, Map.of("reason", " "), 400);
+        assertThat(call(HttpMethod.POST, rejection, otherAdmin, Map.of("reason", "验收发现异响"), 200)
+                .path("status").asText()).isEqualTo("IN_REPAIR");
+        call(HttpMethod.POST, transition, admin, Map.of("status", "SETTLED", "cost", 0), 409);
+        call(HttpMethod.POST, transition, admin, Map.of("status", "DONE", "completedOn", today,
+                "completedOdometerKm", 1520), 200);
+        call(HttpMethod.POST, transition, admin, Map.of("status", "ACCEPTED"), 200);
+        String enabled = CARE + "/maintenance/" + plan + "/enabled?enabled=";
+        call(HttpMethod.PATCH, enabled + "false", admin, null, 200);
+        var settle = Map.of("status", "SETTLED", "cost", 100.25, "applyMaintenance", true, "expectedCycle", 1);
+        call(HttpMethod.POST, transition, admin, settle, 409);
+        call(HttpMethod.PATCH, enabled + "true", admin, null, 200);
+        call(HttpMethod.POST, transition, admin, Map.of("status", "SETTLED", "cost", 100.25,
+                "applyMaintenance", true, "expectedCycle", 2), 409);
+        assertThat(call(HttpMethod.POST, transition, admin, settle, 200).path("maintenanceCycleApplied").asInt()).isEqualTo(1);
+        call(HttpMethod.POST, transition, admin, settle, 409);
+        var planView = call(HttpMethod.GET, vehiclePath + "/maintenance", admin, null, 200).get(0);
+        assertThat(planView.path("cycle").asInt()).isEqualTo(2);
+        assertThat(planView.path("nextOdometerKm").asDouble()).isEqualTo(2020);
+        var history = call(HttpMethod.GET, path + "/history", admin, null, 200);
+        assertThat(history.get(4).path("reason").asText()).isEqualTo("验收发现异响");
+        assertThat(history.get(4).path("operatorId").asLong()).isEqualTo(otherAdmin);
+        assertThat(history.get(4).path("completedOdometerKm").asDouble()).isEqualTo(1500);
+        assertThat(history.get(history.size() - 1).path("maintenanceCycleApplied").asInt()).isEqualTo(1);
+    }
+
+    @Test
+    void certificatesUseVersionsAndSeparateTodayFromEarlierReminderStages() throws Exception {
+        String path = OPS + "/certificates";
+        var payload = certificateBody(today, 0);
+        long otherAdmin = user("o2", "PLATFORM_ADMIN", null);
+        race(() -> rawStatus(HttpMethod.PUT, path, admin, payload),
+                () -> rawStatus(HttpMethod.PUT, path, otherAdmin, payload));
+        var all = call(HttpMethod.GET, path + "?subjectType=VEHICLE&subjectId=" + vehicle, admin, null, 200);
+        assertThat(all).hasSize(1);
+        var original = all.get(0);
+        long id = id(original);
+        assertThat(original.path("version").asLong()).isEqualTo(1);
+        jdbc.update("""
+                INSERT INTO operation_reminder(source_type,source_id,cycle_key,stage,fleet_id,subject_type,
+                    subject_id,title,due_date,created_at)
+                VALUES('CERTIFICATE',?,?,'DUE_SOON',?,'VEHICLE',?,'INSURANCE',?,?)
+                """, id, today.toString(), fleet, vehicle, today, now.minusDays(1));
+        reminders.scan();
+        reminders.scan();
+        String remindersPath = OPS + "/reminders?fleetId=" + fleet + "&sourceId=" + id
+                + "&sourceType=CERTIFICATE&subjectType=VEHICLE&subjectId=" + vehicle;
+        var due = call(HttpMethod.GET, remindersPath + "&stage=DUE&createdFrom=" + today + "T00:00:00",
+                admin, null, 200);
+        assertThat(due).hasSize(1);
+        assertThat(due.get(0).path("sourceId").asLong()).isEqualTo(id);
+        assertThat(call(HttpMethod.GET, remindersPath + "&stage=DUE_SOON", admin, null, 200)).hasSize(1);
+
+        var renewed = certificate(today.plusDays(10), 1);
+        assertThat(id(renewed)).isEqualTo(id);
+        assertThat(renewed.path("version").asLong()).isEqualTo(2);
+        call(HttpMethod.PUT, path, otherAdmin, certificateBody(today.plusDays(20), 1), 409);
+        call(HttpMethod.PUT, path, otherAdmin, certificateBody(today.plusDays(20), 0), 409);
+        reminders.scan();
+        assertThat(call(HttpMethod.GET, remindersPath, admin, null, 200)).hasSize(3);
+    }
+
+    private JsonNode certificate(LocalDate expiry, long expectedVersion) throws Exception {
+        return call(HttpMethod.PUT, OPS + "/certificates", admin, certificateBody(expiry, expectedVersion), 200);
+    }
+
+    private Map<String, Object> certificateBody(LocalDate expiry, long expectedVersion) {
+        return Map.of("subjectType", "VEHICLE", "subjectId", vehicle, "certificateType", "INSURANCE",
+                "expiresOn", expiry, "expectedVersion", expectedVersion);
+    }
+
+    private static JsonNode fuelRow(JsonNode rows, long id) {
+        for (JsonNode row : rows) {
+            if (row.path("record").path("id").asLong() == id) { return row; }
+        }
+        throw new AssertionError("Missing fuel row " + id);
     }
 
     private static JsonNode find(JsonNode history, String source) {
@@ -487,11 +640,18 @@ class FleetOperationsIntegrationTest {
     }
 
     private long fuel(long id, LocalDateTime time, int liters, int km) throws Exception {
-        return call(HttpMethod.POST, CARE + "/vehicles/" + id + "/fuel", admin, fuelBody(time, liters, km), 200).asLong();
+        return fuel(id, time, liters, km, "FULL");
     }
 
-    private static Map<String, Object> fuelBody(LocalDateTime time, int liters, int km) {
-        return Map.of("fueledAt", time, "liters", liters, "unitPrice", 7.25, "odometerKm", km);
+    private long fuel(long id, LocalDateTime time, int liters, int km, String fillStatus) throws Exception {
+        return call(HttpMethod.POST, CARE + "/vehicles/" + id + "/fuel", admin,
+                Map.of("fueledAt", time, "liters", liters, "unitPrice", 7.25, "odometerKm", km, "fillStatus", fillStatus),
+                200).asLong();
+    }
+
+    private static Map<String, Object> fuelCorrection(LocalDateTime time, int liters, int km, String fillStatus, long version) {
+        return Map.of("fueledAt", time, "liters", liters, "unitPrice", 7.25, "odometerKm", km, "fillStatus", fillStatus,
+                "expectedVersion", version, "reason", "根据票据修正");
     }
 
     private long user(String suffix, String role, Long binding) {

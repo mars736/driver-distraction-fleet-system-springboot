@@ -26,10 +26,9 @@ public class OperationsReminderController {
     }
 
     @GetMapping("/reminders")
-    public Result<List<Reminder>> reminders(@RequestParam(required = false) Long fleetId,
-                                             @RequestParam(required = false) SourceType sourceType,
+    public Result<List<Reminder>> reminders(@Valid @ModelAttribute ReminderFilter filter,
                                              @RequestParam(defaultValue = "1") int page,
                                              @RequestParam(defaultValue = "20") int pageSize) {
-        return Result.success(service.reminders(fleetId, sourceType, page, pageSize));
+        return Result.success(service.reminders(filter, page, pageSize));
     }
 }
