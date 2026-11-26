@@ -47,7 +47,7 @@ class DriverScoreIntegrationTest {
             r.add("spring.sql.init.schema-locations", DriverScoreIntegrationTest::h2Schema);
         } else {
             String url = System.getenv("DRIVER_SCORE_TEST_DB_URL");
-            if (url == null || !url.matches("jdbc:mysql://(localhost|127\\.0\\.0\\.1):[0-9]+/driver_score_test([?].*)?")) {
+            if (url == null || !url.matches("jdbc:mysql://(localhost|127\\.0\\.0\\.1):[0-9]+/driver_score_test(?:_[0-9]+)?([?].*)?")) {
                 throw new IllegalStateException("评分 MySQL 测试只允许本机 driver_score_test 专用库");
             }
             r.add("spring.datasource.url", () -> url);
@@ -96,6 +96,7 @@ class DriverScoreIntegrationTest {
         jdbc.update("DELETE FROM alert_review_record WHERE alert_id IN (SELECT id FROM alert_record WHERE fleet_id=?)",fleet);
         jdbc.update("DELETE FROM alert_record WHERE fleet_id=?",fleet);
         jdbc.update("DELETE FROM recognition_record WHERE fleet_id=?",fleet);
+        jdbc.update("DELETE FROM operation_log WHERE fleet_id=?",fleet);
         jdbc.update("DELETE FROM sys_user WHERE fleet_id=?",fleet);
         jdbc.update("DELETE FROM vehicle WHERE id=?",vehicle);
         jdbc.update("DELETE FROM fleet WHERE id=?",fleet);
@@ -136,6 +137,22 @@ class DriverScoreIntegrationTest {
         mvc.perform(get("/api/scores/drivers/"+driver+"?month=2026-02").header("Authorization",driverToken))
                 .andExpect(jsonPath("$.data.score").value(100));
     }
+    @Test void disablingDriverKeepsHistoricalScoreAndHistoryPreventsDeletion() throws Exception {
+        alert(driver,"SMS_ALERT","OPEN","2026-01-10 00:00:00");
+        mvc.perform(delete("/api/drivers/{id}",driver).header("Authorization",adminToken))
+                .andExpect(jsonPath("$.code").value(409));
+        mvc.perform(patch("/api/drivers/{id}/status",driver).header("Authorization",adminToken)
+                        .param("enabled","false")).andExpect(status().isOk());
+        mvc.perform(get("/api/scores/me").header("Authorization",driverToken))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/scores/drivers/{id}/detail",driver).header("Authorization",adminToken)
+                        .param("month","2026-01"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.summary.score").value(95))
+                .andExpect(jsonPath("$.data.records.total").value(1))
+                .andExpect(jsonPath("$.data.records.list[0].effectiveDeduction").value(5));
+    }
+
     @Test void pendingAndWithdrawnAppealsKeepDeductionButRevokedAppealRemovesIt() throws Exception {
         long alert = alert(driver,"SMS_ALERT","CONFIRMED","2026-01-10 00:00:00");
         long appeal = appeal(alert);

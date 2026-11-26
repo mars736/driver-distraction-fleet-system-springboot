@@ -119,7 +119,7 @@ public class ReportDataService {
                 row.getRevokedCount(), row.getRanking()
         }).toList();
         return new ReportTable("司机评分报表", List.of("月份", "车队 ID", "司机 ID", "司机", "工号", "分数", "等级",
-                "累计扣分", "短信告警数", "其他告警数", "已撤销数", "排名"), rows);
+                "累计扣分", "短信告警数", "其他告警数", "已撤销数", "排名"), rows, request.month());
     }
 
     private ReportTable fleetTable(ReportRequest request) {

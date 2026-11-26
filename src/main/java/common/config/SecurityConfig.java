@@ -103,6 +103,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/alerts/*/reviews").hasRole("PLATFORM_ADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/alerts/export").hasRole("PLATFORM_ADMIN")
                 .requestMatchers(HttpMethod.HEAD, "/api/alerts/export").hasRole("PLATFORM_ADMIN")
+                .requestMatchers("/api/alerts/rule-configuration").hasRole("PLATFORM_ADMIN")
                 .requestMatchers(HttpMethod.GET, "/api/alerts", "/api/alerts/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
                 .requestMatchers(HttpMethod.HEAD, "/api/alerts", "/api/alerts/**").hasAnyRole("PLATFORM_ADMIN", "DRIVER")
                 .requestMatchers("/api/alerts", "/api/alerts/**").denyAll()

@@ -35,3 +35,7 @@
 - `SENT` 表示阿里云已受理，`DELIVERED` 表示回执确认送达，`DELIVERY_FAILED` 表示回执报告投递失败。`FAILED` 表示提交明确被拒，`SEND_UNKNOWN` 表示可能已受理，需要查单。超时或重启后只查单，查不到时继续观察，最多对账两天。两天后仍未确认时停止自动查询，可用阿里云控制台核对。回执终结或停止查询后，任务自动清空手机号，仅保留流水号、状态码和时间。
 - 验收使用单独的测试库、绑定车辆的授权测试手机号和已审核模板。以司机身份上报大于 5 km/h 的车速，用测试视频触发连续 5 帧 C1/C3，在告警详情确认短信状态并核对手机收件。先在模拟环境验证规则，再启用真实通道。
 - [阿里云发送接口](https://help.aliyun.com/zh/sms/developer-reference/api-dysmsapi-2017-05-25-sendsms)、[阿里云回执查询](https://help.aliyun.com/zh/sms/developer-reference/api-dysmsapi-2017-05-25-querysenddetails)。
+
+操作日志查询新增精确筛选 `requestId` 和对象类型 `targetType`，可与 `targetId` 同用。登录失败时 `actorId` 为空，`targetId` 只表示找到的尝试账号。失败原因保存在 `detailCode`；找不到账号时两个 ID 均为空。
+
+管理员使用 `GET /api/alerts/rule-configuration` 读取启动时生效的后端告警阈值和配置版本。连续短信行为帧数达到阈值时触发短信告警，其他异常行为的小时累计次数超过阈值时触发留档，对已知车速，小于等于静默速度时不触发行为告警。模型门控阈值由推理服务管理。

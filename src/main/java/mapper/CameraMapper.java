@@ -29,6 +29,7 @@ public interface CameraMapper {
 
     int update(Camera camera);
 
+    int updateSampleInterval(@Param("id") long id, @Param("seconds") double seconds);
     int updateEnabled(@Param("id") Long id, @Param("enabled") boolean enabled);
 
     int deleteById(Long id);

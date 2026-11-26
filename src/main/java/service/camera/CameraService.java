@@ -34,7 +34,8 @@ public class CameraService {
     public record View(Long id, Long vehicleId, Long driverId, String driverBindingState,
                        String sourceId, String sourceKind, boolean sourceConfigured,
                        Double sampleIntervalSeconds, boolean enabled, String captureState,
-                       Instant lastFrameAt, String failureReason, LocalDateTime createTime, LocalDateTime updateTime) { }
+                       Instant lastFrameAt, String failureReason, LocalDateTime createTime, LocalDateTime updateTime,
+                       long configVersion) { }
 
     public List<View> listAll() {
         return cameras.listAll().stream().map(this::view).toList();
@@ -42,6 +43,30 @@ public class CameraService {
 
     public View getById(Long id) {
         return view(requireCamera(cameras.selectById(id)));
+    }
+
+    public record RecentFrame(long cameraId, String streamId, long frameId, Instant capturedAt, String imagePath) { }
+
+    public List<RecentFrame> recentFrames(long id) {
+        requireCamera(cameras.selectById(id));
+        Camera runnable = cameras.selectRunnable(id);
+        if (!previewAllowed(runnable)) { return List.of(); }
+        return ffmpeg.recentPreviews(id, runnable.getConfigVersion()).stream()
+                .map(frame -> new RecentFrame(id, frame.streamId(), frame.frameId(),
+                        Instant.ofEpochMilli(frame.capturedAt()),
+                        "/api/cameras/" + id + "/recent-frames/" + frame.frameId() + "?streamId=" + frame.streamId()))
+                .toList();
+    }
+
+    public byte[] recentFrame(long id, String streamId, long frameId) {
+        Camera runnable = cameras.selectRunnable(id);
+        var frame = previewAllowed(runnable) ? ffmpeg.preview(id, runnable.getConfigVersion(), streamId, frameId) : null;
+        if (frame == null) { throw new BusinessException(404, "采集图片不存在或已过期"); }
+        return frame.jpeg();
+    }
+
+    private boolean previewAllowed(Camera camera) {
+        return camera != null && sources.resolve(camera.getStreamUrl()) != null;
     }
 
     public List<CameraSourceCatalog.SourceOption> listSources() {
@@ -72,6 +97,25 @@ public class CameraService {
             throw new BusinessException(409, "请先停用摄像头再修改车辆、视频源或采样间隔");
         }
         cameras.update(camera);
+        audit.cameraChange(OperationAction.CAMERA_UPDATE, id, camera.getVehicleId());
+        events.publishEvent(new CameraChanged(id, false));
+        return getById(id);
+    }
+
+    @Transactional
+    public View updateSampleInterval(long id, double seconds, long configVersion) {
+        Camera camera = requireCamera(cameras.lockById(id));
+        if (camera.getConfigVersion() != configVersion) {
+            throw new BusinessException(409, "摄像头配置已更新，请刷新后重试");
+        }
+        validateInterval(seconds);
+        if (Objects.equals(camera.getSampleIntervalSeconds(), seconds)) {
+            return view(camera);
+        }
+        if (Boolean.TRUE.equals(camera.getEnabled())) {
+            throw new BusinessException(409, "请先停用摄像头再修改采样间隔");
+        }
+        cameras.updateSampleInterval(id, seconds);
         audit.cameraChange(OperationAction.CAMERA_UPDATE, id, camera.getVehicleId());
         events.publishEvent(new CameraChanged(id, false));
         return getById(id);
@@ -154,7 +198,7 @@ public class CameraService {
         return new View(camera.getId(), camera.getVehicleId(), binding.driverId(), binding.state().name(),
                 sources.sourceId(camera.getStreamUrl()), sourceKind, sourceKind != null,
                 camera.getSampleIntervalSeconds(), enabled, captureState, runtime.lastFrameAt(), runtime.failureReason(),
-                camera.getCreateTime(), camera.getUpdateTime());
+                camera.getCreateTime(), camera.getUpdateTime(), camera.getConfigVersion());
     }
 
     private static Camera requireCamera(Camera camera) {

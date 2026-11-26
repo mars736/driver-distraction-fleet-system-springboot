@@ -53,12 +53,17 @@
         SET vehicle_id = #{vehicleId},
             driver_id = #{driverId},
             stream_url = #{streamUrl},
-            sample_interval_seconds = #{sampleIntervalSeconds}
+            sample_interval_seconds = #{sampleIntervalSeconds},
+            config_version = config_version + 1
         WHERE id = #{id}
     </update>
 
+    <update id="updateSampleInterval">
+        UPDATE camera SET sample_interval_seconds = #{seconds}, config_version = config_version + 1 WHERE id = #{id}
+    </update>
+
     <update id="updateEnabled">
-        UPDATE camera SET enabled = #{enabled} WHERE id = #{id}
+        UPDATE camera SET enabled = #{enabled}, config_version = config_version + 1 WHERE id = #{id}
     </update>
 
     <delete id="deleteById">

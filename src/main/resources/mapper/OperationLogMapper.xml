@@ -13,6 +13,8 @@
             <if test="fleetId != null">AND fleet_id = #{fleetId}</if>
             <if test="actorId != null">AND actor_id = #{actorId}</if>
             <if test="targetId != null">AND target_id = #{targetId}</if>
+            <if test="targetType != null">AND target_type = #{targetType}</if>
+            <if test="requestId != null">AND request_id = #{requestId}</if>
             <if test="action != null">AND action = #{action}</if>
             <if test="startTime != null">AND operated_at &gt;= #{startTime}</if>
             <if test="endTime != null">AND operated_at &lt; #{endTime}</if>

@@ -121,6 +121,9 @@ public class DriverService {
     public void delete(Long id) {
         User user = lockDriver(id);
         bindings.prepare(user, null, user.getFleetId(), false);
+        if (userMapper.hasDriverHistory(id)) {
+            throw new BusinessException(409, "司机已有业务或操作历史，请停用账号以保留历史记录");
+        }
         userMapper.deleteById(id);
         audit.success(OperationAction.DRIVER_DELETE, id, user.getFleetId());
         log.info("删除司机 id={}", id);

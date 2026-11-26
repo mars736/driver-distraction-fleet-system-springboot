@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -125,6 +126,16 @@ class CameraMonitoringIntegrationTest {
         InferFrame beforeSwap = frame(first);
         assertThat(beforeSwap.getDriverId()).isEqualTo(firstDriver);
         assertPersistedDriver(beforeSwap, firstDriver);
+        mvc.perform(get("/api/cameras/{id}/recent-frames", cameraA).header("Authorization", admin))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].frameId").value(beforeSwap.getFrameId()))
+                .andExpect(jsonPath("$.data[0].streamId").value(beforeSwap.getStreamId()));
+        mvc.perform(get("/api/cameras/{id}/recent-frames/{frameId}", cameraA, beforeSwap.getFrameId())
+                        .header("Authorization", admin).param("streamId", beforeSwap.getStreamId()))
+                .andExpect(status().isOk()).andExpect(content().contentType(MediaType.IMAGE_JPEG));
+        mvc.perform(get("/api/cameras/{id}/recent-frames/{frameId}", cameraB, beforeSwap.getFrameId())
+                        .header("Authorization", admin).param("streamId", beforeSwap.getStreamId()))
+                .andExpect(status().isNotFound());
 
         bind(firstDriver, null);
         bind(secondDriver, vehicle);
@@ -136,12 +147,16 @@ class CameraMonitoringIntegrationTest {
         jdbc.update("UPDATE sys_user SET vehicle_id=? WHERE id=?", vehicle, firstDriver);
         InferFrame ambiguous = frame(first);
         assertThat(ambiguous.getDriverId()).isNull();
-        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(jdbc.queryForObject("""
+        await().ignoreException(EmptyResultDataAccessException.class)
+                .atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(jdbc.queryForObject("""
                 SELECT decision_reason FROM recognition_record WHERE camera_id=? AND source_frame_id=?
                 """, String.class, cameraA, ambiguous.getFrameId())).isEqualTo("DRIVER_UNRESOLVED"));
 
         vehicleMonitoring(0);
         assertThat(first.running.get()).isFalse();
+        mvc.perform(get("/api/cameras/{id}/recent-frames/{frameId}", cameraA, beforeSwap.getFrameId())
+                        .header("Authorization", admin).param("streamId", beforeSwap.getStreamId()))
+                .andExpect(status().isNotFound());
         assertThat(second.running.get()).isFalse();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM camera WHERE vehicle_id=? AND enabled=1",
                 Integer.class, vehicle)).isEqualTo(2);
@@ -180,6 +195,20 @@ class CameraMonitoringIntegrationTest {
                         {"vehicleId":%d,"sampleIntervalSeconds":1.0}
                         """.formatted(vehicle)))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.sourceId").value("test"));
+        mvc.perform(patch("/api/cameras/{id}/sample-interval", camera).header("Authorization", admin)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"sampleIntervalSeconds":3,"configVersion":0}
+                                """)).andExpect(status().isConflict());
+        mvc.perform(patch("/api/cameras/{id}/sample-interval", camera).header("Authorization", admin)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"sampleIntervalSeconds":3,"configVersion":1}
+                                """)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.configVersion").value(2))
+                .andExpect(jsonPath("$.data.vehicleId").value(vehicle))
+                .andExpect(jsonPath("$.data.sourceId").value("test"))
+                .andExpect(jsonPath("$.data.sampleIntervalSeconds").value(3.0));
         mvc.perform(post("/api/cameras").header("Authorization", admin).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"sourceId\":\"bad\"}"))
                 .andExpect(status().isBadRequest());
@@ -189,7 +218,7 @@ class CameraMonitoringIntegrationTest {
         cameraEnabled(camera, true);
         mvc.perform(put("/api/cameras/{id}", camera).header("Authorization", admin)
                         .contentType(MediaType.APPLICATION_JSON).content("""
-                        {"vehicleId":%d,"sampleIntervalSeconds":3.0}
+                        {"vehicleId":%d,"sampleIntervalSeconds":4.0}
                         """.formatted(vehicle)))
                 .andExpect(status().isConflict());
         mvc.perform(delete("/api/cameras/{id}", camera).header("Authorization", admin)).andExpect(status().isConflict());
@@ -240,7 +269,8 @@ class CameraMonitoringIntegrationTest {
     }
 
     private void assertPersistedDriver(InferFrame frame, long expected) {
-        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(id("""
+        await().ignoreException(EmptyResultDataAccessException.class)
+                .atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(id("""
                 SELECT driver_id FROM recognition_record WHERE camera_id=? AND source_frame_id=?
                 """, frame.getCameraId(), frame.getFrameId())).isEqualTo(expected));
     }

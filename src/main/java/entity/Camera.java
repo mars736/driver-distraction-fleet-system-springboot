@@ -28,6 +28,7 @@ public class Camera {
     /** 是否启用监控 */
     private Boolean enabled;
 
+    private long configVersion;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 }

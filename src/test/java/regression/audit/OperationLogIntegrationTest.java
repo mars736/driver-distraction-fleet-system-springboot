@@ -68,6 +68,13 @@ class OperationLogIntegrationTest {
                                 """.formatted(key)))
                 .andExpect(jsonPath("$.code").value(400));
 
+        mvc.perform(get("/api/alerts/rule-configuration")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/alerts/rule-configuration").header("Authorization", "Bearer " + jwt.generateToken(driver, 0)))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/alerts/rule-configuration").header("Authorization", authorization))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.version").isString())
+                .andExpect(jsonPath("$.data.silentSpeedKmh.operator").value("LTE"));
         mvc.perform(get("/api/operation-logs")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/operation-logs").header("Authorization", "Bearer " + jwt.generateToken(driver, 0)))
                 .andExpect(status().isForbidden());
@@ -83,8 +90,26 @@ class OperationLogIntegrationTest {
                 .andExpect(jsonPath("$.data.list[0].detailCode").value("BAD_PASSWORD"))
                 .andExpect(jsonPath("$.data.list[0].outcome").value("FAILURE"))
                 .andExpect(jsonPath("$.data.list[0].requestId").isString())
+                .andExpect(jsonPath("$.data.list[0].actorId").isEmpty())
+                .andExpect(jsonPath("$.data.list[0].targetId").value(driver))
                 .andExpect(content().string(not(containsString("13900001234"))))
                 .andExpect(content().string(not(containsString("wrongPassword"))));
+
+        String requestId = jdbc.queryForObject(
+                "SELECT request_id FROM operation_log WHERE fleet_id=? AND detail_code='BAD_PASSWORD'",
+                String.class, fleetId);
+        jdbc.update("""
+                INSERT INTO operation_log (fleet_id, action, target_type, target_id, outcome, request_id, operated_at)
+                VALUES (?, 'APPEAL_DECIDE', 'APPEAL', ?, 'SUCCESS', ?, NOW())
+                """, fleetId, driver, requestId);
+        mvc.perform(get("/api/operation-logs").header("Authorization", authorization)
+                        .param("requestId", requestId))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(2));
+        mvc.perform(get("/api/operation-logs").header("Authorization", authorization)
+                        .param("requestId", requestId).param("targetType", "USER").param("targetId", Long.toString(driver)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.list[0].action").value("AUTH_LOGIN"));
+
     }
 
     @Test
