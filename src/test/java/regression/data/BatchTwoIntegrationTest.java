@@ -250,7 +250,7 @@ class BatchTwoIntegrationTest {
     }
 
     private void position(long time, double longitude) {
-        jdbc.update("INSERT INTO vehicle_telemetry VALUES (?,?,?,0,?,30)", vehicle, driver, time, longitude);
+        jdbc.update("INSERT INTO vehicle_telemetry (vehicle_id,driver_id,sampled_at,latitude,longitude,speed_kmh) VALUES (?,?,?,0,?,30)", vehicle, driver, time, longitude);
     }
 
     private long user(String username, String role, String name, Long assignedVehicle) {

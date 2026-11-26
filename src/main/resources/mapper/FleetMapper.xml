@@ -45,8 +45,9 @@
     </select>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO fleet (fleet_no, name, manager, phone, established_date, remark, enabled)
-        VALUES (#{fleetNo}, #{name}, #{manager}, #{phone}, #{establishedDate}, #{remark}, #{enabled})
+        INSERT INTO fleet (fleet_no, name, manager, phone, established_date, remark, enabled, stopped_at)
+        VALUES (#{fleetNo}, #{name}, #{manager}, #{phone}, #{establishedDate}, #{remark}, #{enabled},
+            CASE WHEN #{enabled}=0 THEN CAST(UNIX_TIMESTAMP(CURRENT_TIMESTAMP(3))*1000 AS UNSIGNED) END)
     </insert>
 
     <update id="update">
@@ -61,7 +62,12 @@
     </update>
 
     <update id="updateEnabled">
-        UPDATE fleet SET enabled = #{enabled} WHERE id = #{id}
+        UPDATE fleet
+        SET stopped_at=CASE WHEN #{enabled}=0 AND (enabled=1 OR stopped_at IS NULL)
+                THEN GREATEST(CAST(UNIX_TIMESTAMP(CURRENT_TIMESTAMP(3))*1000 AS UNSIGNED), COALESCE(stopped_at,0)+1)
+                ELSE stopped_at END,
+            enabled=#{enabled}
+        WHERE id=#{id}
     </update>
 
     <delete id="deleteById">

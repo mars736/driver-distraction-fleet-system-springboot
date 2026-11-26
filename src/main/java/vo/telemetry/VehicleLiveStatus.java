@@ -2,5 +2,6 @@ package vo.telemetry;
 
 public record VehicleLiveStatus(Long vehicleId, Long fleetId, String plateNo,
                                 boolean online, Long sampledAt, Double latitude,
-                                Double longitude, Double speedKmh) {
-}
+                                Double longitude, Double speedKmh, Long driverId, String locationStatus,
+                                long evaluatedAt, Long receivedAt, String coordinateSystem,
+                                StoppedMotionCheck movementCheck) { }

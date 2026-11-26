@@ -20,7 +20,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 import service.alert.AlertDecisionService;
 import service.alert.CapturedInference;
 import service.telemetry.VehicleOfflineNotifier;
-import mapper.VehicleMapper;
+import service.telemetry.VehicleTelemetryService;
+import dto.telemetry.VehicleTelemetryRequest;
+import mapper.VehicleTelemetryMapper;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -50,7 +52,9 @@ class AlertLiveStreamIntegrationTest {
     @Autowired PlatformTransactionManager transactions;
     @Autowired ApplicationEventPublisher events;
     @Autowired VehicleOfflineNotifier offlineNotifier;
-    @Autowired VehicleMapper vehicles;
+    @Autowired VehicleTelemetryService telemetryService;
+    @Autowired VehicleTelemetryMapper telemetry;
+
     private long fleet;
     private long driverA;
     private long driverB;
@@ -74,7 +78,10 @@ class AlertLiveStreamIntegrationTest {
         jdbc.update("DELETE FROM alert_record WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM recognition_record WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM alert_vehicle_state WHERE vehicle_id IN (SELECT id FROM vehicle WHERE fleet_id=?)", fleet);
-        jdbc.update("DELETE FROM vehicle_offline_notice WHERE vehicle_id IN (SELECT id FROM vehicle WHERE fleet_id=?)", fleet);
+        jdbc.update("DELETE FROM vehicle_task_offline_notice WHERE vehicle_id IN (SELECT id FROM vehicle WHERE fleet_id=?)", fleet);
+        jdbc.update("DELETE FROM transport_task WHERE fleet_id=?", fleet);
+        jdbc.update("DELETE FROM vehicle_stopped_motion_check WHERE fleet_id=?", fleet);
+        jdbc.update("DELETE FROM vehicle_stopped_motion_state WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM vehicle_telemetry WHERE vehicle_id IN (SELECT id FROM vehicle WHERE fleet_id=?)", fleet);
         jdbc.update("DELETE FROM sys_user WHERE id IN (?,?,?,?)", driverA, driverB, admin, unknownRole);
         jdbc.update("DELETE FROM vehicle WHERE fleet_id=?", fleet);
@@ -203,23 +210,44 @@ class AlertLiveStreamIntegrationTest {
     void reportsOfflineOnlyToAdminsAndOnlyOncePerStalePosition() throws Exception {
         long vehicleId = insert("INSERT INTO vehicle(fleet_id,plate_no) VALUES (?,?)", fleet, "O" + key());
         jdbc.update("UPDATE sys_user SET vehicle_id=? WHERE id=?", vehicleId, driverA);
-        var vehicle = vehicles.selectById(vehicleId);
         long now = System.currentTimeMillis();
         long oldSample = now - 30_000;
-        jdbc.update("INSERT INTO vehicle_telemetry VALUES (?, ?, ?, 24.48, 118.08, 12)", vehicleId, driverA, oldSample);
+        var departed = java.time.Instant.ofEpochMilli(now - 35_000).atZone(java.time.ZoneId.of("Asia/Shanghai")).toLocalDateTime();
+        long task = insert("""
+                INSERT INTO transport_task(driver_id,vehicle_id,fleet_id,task_type,description,starts_at,ends_at,
+                    status,created_by,created_at,departed_at) VALUES (?,?,?,'TEST','测试',?,?,'RUNNING',?,?,?)
+                """, driverA, vehicleId, fleet, departed, departed.plusHours(1), admin, departed, departed);
+        String sampleSql = """
+                INSERT INTO vehicle_telemetry(vehicle_id,driver_id,sampled_at,latitude,longitude,speed_kmh)
+                VALUES (?, ?, ?, 24.48, 118.08, 12)
+                """;
+        jdbc.update(sampleSql, vehicleId, driverA, oldSample - 10_000);
+        offlineNotifier.notifyIfStillOffline(vehicleId, driverA, task, now);
+        assertThat(offlineNoticeCount(vehicleId)).isZero();
+        assertThat(telemetry.findOfflineCandidates(java.util.List.of(vehicleId), now - 15_000)).isEmpty();
+        jdbc.update(sampleSql, vehicleId, driverA, oldSample);
+        assertThat(telemetry.findOfflineCandidates(java.util.List.of(vehicleId), now - 15_000))
+                .containsExactly(new VehicleTelemetryMapper.OfflineCandidate(vehicleId, driverA, task));
         try (var all = subscribe(admin); var driver = subscribe(driverA)) {
-            offlineNotifier.notifyIfStillOffline(vehicle, driverA, now);
-            offlineNotifier.notifyIfStillOffline(vehicle, driverA, now);
-            assertThat(nextEvent(all, "vehicle-offline").path("vehicleId").asLong()).isEqualTo(vehicleId);
+            offlineNotifier.notifyIfStillOffline(vehicleId, driverA, task, now);
+            offlineNotifier.notifyIfStillOffline(vehicleId, driverA, task, now);
+            var event = nextEvent(all, "vehicle-offline");
+            assertThat(event.path("vehicleId").asLong()).isEqualTo(vehicleId);
+            assertThat(event.path("taskId").asLong()).isEqualTo(task);
+            assertThat(event.path("driverId").asLong()).isEqualTo(driverA);
+            assertThat(telemetry.findOfflineCandidates(java.util.List.of(vehicleId), now - 15_000)).isEmpty();
 
             long newSample = now - 1000;
-            jdbc.update("INSERT INTO vehicle_telemetry VALUES (?, ?, ?, 24.48, 118.08, 12)", vehicleId, driverA, newSample);
-            offlineNotifier.notifyIfStillOffline(vehicle, driverA, now);
-            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM vehicle_offline_notice WHERE vehicle_id=?",
-                    Long.class, vehicleId)).isEqualTo(1);
+            jdbc.update(sampleSql, vehicleId, driverA, newSample);
+            offlineNotifier.notifyIfStillOffline(vehicleId, driverA, task, now);
+            assertThat(offlineNoticeCount(vehicleId)).isEqualTo(1);
 
-            offlineNotifier.notifyIfStillOffline(vehicle, driverA, now + 20_000);
+            offlineNotifier.notifyIfStillOffline(vehicleId, driverA, task, now + 20_000);
             assertThat(nextEvent(all, "vehicle-offline").path("sampledAt").asLong()).isEqualTo(newSample);
+            jdbc.update("UPDATE transport_task SET status='COMPLETED' WHERE id=?", task);
+            jdbc.update(sampleSql, vehicleId, driverA, now);
+            offlineNotifier.notifyIfStillOffline(vehicleId, driverA, task, now + 20_000);
+            assertThat(offlineNoticeCount(vehicleId)).isEqualTo(2);
             fire(input(driverA));
             assertThat(nextAlert(driver)).isEqualTo(newestAlert(driverA));
         }
@@ -239,6 +267,38 @@ class AlertLiveStreamIntegrationTest {
             fire(input(driverA));
             assertThat(nextAlert(driverStream)).isEqualTo(newestAlert(driverA));
         }
+    }
+
+    @Test
+    void stoppedFleetMotionIsPublishedOnceAndOnlyToAdministrators() throws Exception {
+        long vehicleId = insert("INSERT INTO vehicle(fleet_id,plate_no) VALUES (?,?)", fleet, "M" + key());
+        jdbc.update("UPDATE sys_user SET vehicle_id=? WHERE id=?", vehicleId, driverA);
+        long time = System.currentTimeMillis() - 1_000;
+        jdbc.update("UPDATE fleet SET enabled=0,stopped_at=? WHERE id=?", time - 100, fleet);
+        try (var adminStream = subscribe(admin); var driverStream = subscribe(driverA)) {
+            reportMoving(vehicleId, time);
+            reportMoving(vehicleId, time);
+            reportMoving(vehicleId, time + 100);
+            reportMoving(vehicleId, time + 200);
+            var check = nextEvent(adminStream, "stopped-fleet-motion");
+            assertThat(check.path("driverId").asLong()).isEqualTo(driverA);
+            assertThat(check.path("firstSampledAt").asLong()).isEqualTo(time);
+            assertThat(check.path("secondSampledAt").asLong()).isEqualTo(time + 100);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM vehicle_stopped_motion_check WHERE fleet_id=?",
+                    Long.class, fleet)).isEqualTo(1);
+            fire(input(driverA));
+            assertThat(nextAlert(driverStream)).isEqualTo(newestAlert(driverA));
+        }
+    }
+
+    private void reportMoving(long vehicleId, long sampledAt) {
+        telemetryService.report(driverA, new VehicleTelemetryRequest(vehicleId, sampledAt,
+                java.math.BigDecimal.valueOf(24.48), java.math.BigDecimal.valueOf(118.08), java.math.BigDecimal.valueOf(2)));
+    }
+
+    private long offlineNoticeCount(long vehicleId) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM vehicle_task_offline_notice WHERE vehicle_id=?",
+                Long.class, vehicleId);
     }
 
     private com.fasterxml.jackson.databind.JsonNode nextEvent(Scanner scanner, String event) throws Exception {

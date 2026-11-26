@@ -1,8 +1,8 @@
 package service.telemetry;
 
-import entity.Vehicle;
 import lombok.RequiredArgsConstructor;
-import mapper.VehicleMapper;
+import mapper.OperationsRecordMapper;
+import mapper.UserMapper;
 import mapper.VehicleTelemetryMapper;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -10,38 +10,40 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import service.alert.live.VehicleOfflineEvent;
 
+import java.time.ZoneId;
 import java.util.List;
 
 @Service
 @RequiredArgsConstructor
 public class VehicleOfflineNotifier {
+    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+
     private final VehicleTelemetryMapper telemetry;
-    private final VehicleMapper vehicles;
+    private final OperationsRecordMapper records;
+    private final UserMapper users;
     private final ApplicationEventPublisher events;
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public void notifyIfStillOffline(Vehicle vehicle, long driverId, long now) {
-        if (telemetry.lockDriverBinding(driverId, vehicle.getId()) == null) {
+    public void notifyIfStillOffline(long vehicleId, long driverId, long taskId, long now) {
+        if (records.lockUser(driverId) == null) { return; }
+        var vehicle = records.lockVehicle(vehicleId);
+        if (vehicle == null || !Integer.valueOf(1).equals(vehicle.getMonitorEnabled())
+                || !users.findActiveDriversByVehicle(vehicleId).equals(List.of(driverId))) {
             return;
         }
 
-        var monitored = vehicles.selectById(vehicle.getId());
-        if (monitored == null || !Integer.valueOf(1).equals(monitored.getMonitorEnabled())) { return; }
+        var task = telemetry.lockRunningTask(taskId, vehicleId, driverId, vehicle.getFleetId());
+        if (task == null) { return; }
 
-        var latest = telemetry.findLatestPositions(List.of(vehicle.getId()));
-        if (latest.isEmpty()) {
-            return;
-        }
-
-        var position = latest.getFirst();
-        if (position.driverId() != driverId
+        var position = telemetry.findLatestForDriver(vehicleId, driverId);
+        long departure = task.departedAt().atZone(ZONE).toInstant().toEpochMilli();
+        if (position == null || position.sampledAt() < departure
                 || position.sampledAt() >= now - VehicleTelemetryService.MAX_SPEED_AGE_MS) {
             return;
         }
-
-        if (telemetry.claimOfflineNotice(vehicle.getId(), driverId, position.sampledAt(), now) == 1) {
-            events.publishEvent(new VehicleOfflineEvent(vehicle.getId(), monitored.getFleetId(),
-                    position.sampledAt(), now));
+        if (telemetry.claimOfflineNotice(taskId, vehicleId, driverId, position.sampledAt(), now) == 1) {
+            events.publishEvent(new VehicleOfflineEvent(vehicleId, vehicle.getFleetId(), position.sampledAt(), now,
+                    taskId, driverId));
         }
     }
 }

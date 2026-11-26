@@ -27,6 +27,8 @@ class SmsDeliveryIntegrationTest {
     @Autowired SmsDeliveryMapper jobs;
     @Autowired UserMapper users;
 
+    private long fleet;
+    private long vehicle;
     private long driver;
     private long alert;
     private String externalId;
@@ -36,11 +38,16 @@ class SmsDeliveryIntegrationTest {
     @BeforeEach
     void prepare() {
         String key = "sms-test-" + UUID.randomUUID().toString().substring(0, 16);
-        jdbc.update("INSERT INTO sys_user(username, password, name, phone, role, vehicle_id)"
-                + " VALUES (?, 'unused', '测试司机', '13900001234', 'DRIVER', 42)", key);
+        jdbc.update("INSERT INTO fleet(fleet_no,name) VALUES (?,?)", key, "短信测试车队");
+        fleet = jdbc.queryForObject("SELECT id FROM fleet WHERE fleet_no=?", Long.class, key);
+        String plate = key.substring(0, 16);
+        jdbc.update("INSERT INTO vehicle(fleet_id,plate_no) VALUES (?,?)", fleet, plate);
+        vehicle = jdbc.queryForObject("SELECT id FROM vehicle WHERE plate_no=?", Long.class, plate);
+        jdbc.update("INSERT INTO sys_user(username, password, name, phone, role, fleet_id, vehicle_id)"
+                + " VALUES (?, 'unused', '测试司机', '13900001234', 'DRIVER', ?, ?)", key, fleet, vehicle);
         driver = jdbc.queryForObject("SELECT id FROM sys_user WHERE username=?", Long.class, key);
         jdbc.update("INSERT INTO alert_record(recognition_id, vehicle_id, driver_id, captured_at, record_type, sms_status)"
-                + " VALUES (?, 42, ?, CURRENT_TIMESTAMP(3), 'SMS_ALERT', 'PENDING')", -driver, driver);
+                + " VALUES (?, ?, ?, CURRENT_TIMESTAMP(3), 'SMS_ALERT', 'PENDING')", -driver, vehicle, driver);
         alert = jdbc.queryForObject("SELECT id FROM alert_record WHERE driver_id=?", Long.class, driver);
         externalId = key + "-" + alert;
         channel = mock(AlibabaSmsChannel.class);
@@ -51,6 +58,8 @@ class SmsDeliveryIntegrationTest {
     void cleanup() {
         jdbc.update("DELETE FROM alert_record WHERE id=?", alert);
         jdbc.update("DELETE FROM sys_user WHERE id=?", driver);
+        jdbc.update("DELETE FROM vehicle WHERE id=?", vehicle);
+        jdbc.update("DELETE FROM fleet WHERE id=?", fleet);
     }
 
     @Test

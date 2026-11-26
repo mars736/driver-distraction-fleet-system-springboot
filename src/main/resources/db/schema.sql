@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS fleet (
     established_date DATE NULL COMMENT '成立时间',
     remark VARCHAR(255) NULL COMMENT '备注',
     enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT '1 启用，0 停用',
+    stopped_at BIGINT NULL COMMENT '最近一次停运起点，Unix 毫秒',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_fleet_no (fleet_no)
@@ -200,9 +201,41 @@ CREATE TABLE IF NOT EXISTS vehicle_telemetry (
     latitude DOUBLE NOT NULL,
     longitude DOUBLE NOT NULL,
     speed_kmh DOUBLE NULL COMMENT '设备未取得有效速度时为空',
+    received_at BIGINT NULL COMMENT '后端接收时间，Unix 毫秒',
     PRIMARY KEY (vehicle_id, driver_id, sampled_at),
     KEY idx_vehicle_telemetry_track (vehicle_id, sampled_at, driver_id)
 ) COMMENT '司机 App 车辆定位与速度样本';
+
+CREATE TABLE IF NOT EXISTS vehicle_task_offline_notice (
+    task_id BIGINT NOT NULL,
+    vehicle_id BIGINT NOT NULL,
+    driver_id BIGINT NOT NULL,
+    last_sampled_at BIGINT NOT NULL,
+    detected_at BIGINT NOT NULL,
+    PRIMARY KEY (task_id, vehicle_id, driver_id, last_sampled_at)
+) COMMENT '任务内车辆定位离线提示去重';
+
+CREATE TABLE IF NOT EXISTS vehicle_stopped_motion_check (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    vehicle_id BIGINT NOT NULL,
+    fleet_id BIGINT NOT NULL,
+    driver_id BIGINT NOT NULL,
+    stopped_at BIGINT NOT NULL,
+    first_sampled_at BIGINT NOT NULL,
+    second_sampled_at BIGINT NOT NULL,
+    detected_at BIGINT NOT NULL,
+    UNIQUE KEY uk_stopped_motion_samples (vehicle_id, driver_id, stopped_at, first_sampled_at, second_sampled_at)
+) COMMENT '停运车队车辆行驶核查证据';
+
+CREATE TABLE IF NOT EXISTS vehicle_stopped_motion_state (
+    vehicle_id BIGINT PRIMARY KEY,
+    fleet_id BIGINT NOT NULL,
+    driver_id BIGINT NOT NULL,
+    stopped_at BIGINT NOT NULL,
+    last_sampled_at BIGINT NOT NULL,
+    above_threshold BOOLEAN NOT NULL,
+    check_id BIGINT NULL
+) COMMENT '停运车辆连续车速状态';
 
 CREATE TABLE IF NOT EXISTS vehicle_offline_notice (
     vehicle_id BIGINT NOT NULL,

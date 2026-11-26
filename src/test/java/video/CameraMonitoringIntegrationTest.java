@@ -132,7 +132,8 @@ class CameraMonitoringIntegrationTest {
         assertThat(afterSwap.getDriverId()).isEqualTo(secondDriver);
         assertPersistedDriver(afterSwap, secondDriver);
 
-        bind(firstDriver, vehicle);
+        // 模拟升级前已存在的重复绑定。
+        jdbc.update("UPDATE sys_user SET vehicle_id=? WHERE id=?", vehicle, firstDriver);
         InferFrame ambiguous = frame(first);
         assertThat(ambiguous.getDriverId()).isNull();
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(jdbc.queryForObject("""
