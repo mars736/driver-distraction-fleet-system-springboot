@@ -20,6 +20,7 @@ public class AppealRecord {
     private String effectiveStatus;
     private String decisionReason;
     private Long reviewerId;
+    private Long decisionEventId;
     private LocalDateTime reviewedAt;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;

@@ -18,6 +18,7 @@ import service.alert.AlertDecisionService;
 import service.alert.CapturedInference;
 import service.alert.VehicleSpeedProvider;
 
+import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -25,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -292,7 +294,13 @@ class VehicleTelemetryIntegrationTest {
         mvc.perform(patch("/api/fleets/{id}/enabled", fleet).header("Authorization", adminToken())
                         .param("enabled", Boolean.toString(!stopped)))
                 .andExpect(jsonPath("$.code").value(200));
-        return jdbc.queryForObject("SELECT stopped_at FROM fleet WHERE id=?", Long.class, fleet);
+        long stoppedAt = jdbc.queryForObject("SELECT stopped_at FROM fleet WHERE id=?", Long.class, fleet);
+        if (stopped) {
+            // 数据库保存的毫秒时间在 Windows 上可能略领先 JVM 当前时间。
+            await().pollDelay(Duration.ZERO).pollInterval(Duration.ofMillis(5)).atMost(Duration.ofSeconds(2))
+                    .until(() -> System.currentTimeMillis() >= stoppedAt);
+        }
+        return stoppedAt;
     }
 
     private MockHttpServletRequestBuilder liveStatus() {
