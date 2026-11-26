@@ -16,9 +16,10 @@ public interface ViolationDispatchMapper {
                      @Param("input") RevocationWrapup input, @Param("now") LocalDateTime now);
     Long alertId(@Param("id") long id);
     WorkOrder detail(@Param("id") long id);
-    List<WorkOrder> list(@Param("fleetId") Long fleetId, @Param("driverId") Long driverId,
-                         @Param("status") Status status, @Param("risk") RiskLevel risk,
+    List<WorkOrder> list(@Param("filter") OrderFilter filter, @Param("beforeId") Long beforeId,
                          @Param("offset") long offset, @Param("size") int size);
+    LegacyRevocationNote legacyRevocationNote(@Param("id") long id);
+    int insertLegacyRevocationNote(LegacyRevocationNote note);
     List<Operator> operators();
     boolean eligibleOperator(@Param("id") long id);
     void reportPosition(@Param("id") long id, @Param("position") Position position, @Param("now") LocalDateTime now);

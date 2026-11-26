@@ -40,6 +40,9 @@
             , (SELECT p.id FROM alert_appeal p
                WHERE p.target_type='ALERT' AND p.target_id=a.id AND p.status='PENDING'
                ORDER BY p.id DESC LIMIT 1) AS pending_appeal_id
+            , (SELECT w.id FROM violation_work_order w WHERE w.alert_id=a.id) AS work_order_id
+            , (SELECT rr.id FROM alert_review_record rr WHERE rr.alert_id=a.id
+               ORDER BY rr.operated_at DESC, rr.id DESC LIMIT 1) AS latest_review_id
         </if>
         <include refid="viewJoins"/>
         WHERE a.id = #{id}

@@ -74,6 +74,11 @@ class ViolationDispatchIntegrationTest {
 
     @AfterEach
     void cleanup() {
+        jdbc.update("""
+                DELETE n FROM work_order_legacy_revocation_note n
+                JOIN violation_work_order w ON w.id=n.work_order_id
+                JOIN alert_record a ON a.id=w.alert_id WHERE a.fleet_id=?
+                """, fleet);
         jdbc.update("DELETE FROM alert_appeal_event WHERE appeal_id IN (SELECT id FROM alert_appeal WHERE fleet_id=?)", fleet);
         jdbc.update("DELETE FROM alert_appeal WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM alert_review_record WHERE alert_id IN (SELECT id FROM alert_record WHERE fleet_id=?)", fleet);
@@ -270,6 +275,94 @@ class ViolationDispatchIntegrationTest {
             call(HttpMethod.POST, path + "/revocation-wrapup", admin,
                     Map.of("workDone", "已记录", "resolution", "撤销收尾"), 200);
         }
+    }
+
+    @Test
+    void alertsLinkToOrdersAndCursorListingStaysStableWhenNewOrdersArrive() throws Exception {
+        long oldestAlert = alert("BACKLOG", "c5", false);
+        long middleAlert = alert("BACKLOG", "c5", false);
+        long newestAlert = alert("BACKLOG", "c5", false);
+        long noOrderAlert = alert("SPEED_UNKNOWN", null, false);
+        long oldestOrder = id(listFor(oldestAlert));
+        long newestOrder = id(listFor(newestAlert));
+
+        String alertPath = "/api/alerts/" + oldestAlert;
+        assertThat(call(HttpMethod.GET, alertPath, admin, null, 200).path("workOrderId").asLong()).isEqualTo(oldestOrder);
+        assertThat(call(HttpMethod.GET, alertPath, driver, null, 200).path("workOrderId").isNull()).isTrue();
+        assertThat(call(HttpMethod.GET, "/api/alerts/" + noOrderAlert, admin, null, 200).path("workOrderId").isNull()).isTrue();
+        assertThat(call(HttpMethod.GET, order(oldestOrder), admin, null, 200).path("alertId").asLong()).isEqualTo(oldestAlert);
+
+        String arrayPath = API + "/orders?alertId=" + oldestAlert;
+        var exact = call(HttpMethod.GET, arrayPath, admin, null, 200);
+        assertThat(exact.isArray()).isTrue();
+        assertThat(exact).hasSize(1);
+        assertThat(id(exact.get(0))).isEqualTo(oldestOrder);
+        assertThat(call(HttpMethod.GET, arrayPath + "&fleetId=" + (fleet + 1), admin, null, 200)).isEmpty();
+
+        String pagePath = API + "/orders/page?fleetId=" + fleet + "&pageSize=1";
+        var page = call(HttpMethod.GET, pagePath, admin, null, 200);
+        assertThat(page.path("records")).hasSize(1);
+        assertThat(id(page.path("records").get(0))).isEqualTo(newestOrder);
+        assertThat(page.path("hasNext").asBoolean()).isTrue();
+        assertThat(page.path("nextCursor").asLong()).isEqualTo(newestOrder);
+
+        alert("BACKLOG", "c5", false);
+        var next = call(HttpMethod.GET, pagePath + "&beforeId=" + page.path("nextCursor").asLong(), admin, null, 200);
+        assertThat(next.path("records").get(0).path("alertId").asLong()).isEqualTo(middleAlert);
+        var last = call(HttpMethod.GET, pagePath + "&beforeId=" + next.path("nextCursor").asLong(), admin, null, 200);
+        assertThat(id(last.path("records").get(0))).isEqualTo(oldestOrder);
+        assertThat(last.path("hasNext").asBoolean()).isFalse();
+        assertThat(last.path("nextCursor").isNull()).isTrue();
+
+        review(oldestAlert, "REVOKED");
+        assertThat(call(HttpMethod.GET, alertPath, admin, null, 200).path("workOrderId").asLong()).isEqualTo(oldestOrder);
+        var revoked = call(HttpMethod.GET, API + "/orders/page?alertId=" + oldestAlert + "&status=CANCELED", admin, null, 200);
+        assertThat(id(revoked.path("records").get(0))).isEqualTo(oldestOrder);
+        call(HttpMethod.GET, pagePath, driver, null, 403);
+        call(HttpMethod.GET, pagePath + "&beforeId=0", admin, null, 400);
+        call(HttpMethod.GET, API + "/orders?alertId=0", admin, null, 400);
+    }
+
+    @Test
+    void legacyRevocationCanBeRecordedOnceWithoutChangingTheOriginalOrder() throws Exception {
+        long alert = alert("BACKLOG", "c5", false);
+        long orderId = id(listFor(alert));
+        String path = order(orderId);
+        String notePath = path + "/legacy-revocation-note";
+        var notes = Map.of("workDone", "已联系司机", "resolution", "结合原复核结论补记后续情况");
+        assertThat(call(HttpMethod.GET, path, admin, null, 200).path("availableActions").get(0).asText())
+                .isEqualTo("ASSIGN");
+        call(HttpMethod.POST, path + "/assign", admin, Map.of("assigneeId", admin), 200);
+        assertThat(call(HttpMethod.GET, path, admin, null, 200).path("availableActions").get(0).asText())
+                .isEqualTo("START");
+        call(HttpMethod.POST, path + "/start", admin, null, 200);
+        assertThat(call(HttpMethod.GET, path, admin, null, 200).path("availableActions").get(0).asText())
+                .isEqualTo("CLOSE");
+        review(alert, "REVOKED");
+        assertThat(call(HttpMethod.GET, path, admin, null, 200).path("availableActions").get(0).asText())
+                .isEqualTo("REVOCATION_WRAPUP");
+        call(HttpMethod.POST, notePath, admin, notes, 409);
+
+        jdbc.update("UPDATE violation_work_order SET status='CANCELED',revocation_source=NULL,revocation_review_id=NULL,"
+                + "revoked_at=NULL WHERE id=?", orderId);
+        var original = jdbc.queryForMap("SELECT * FROM violation_work_order WHERE id=?", orderId);
+        var pending = call(HttpMethod.GET, path, admin, null, 200);
+        assertThat(pending.path("legacyRevocationNeedsReview").asBoolean()).isTrue();
+        assertThat(pending.path("availableActions").get(0).asText()).isEqualTo("RECORD_LEGACY_REVOCATION");
+        call(HttpMethod.POST, notePath, driver, notes, 403);
+        call(HttpMethod.POST, notePath, admin, Map.of("workDone", " "), 400);
+        var saved = call(HttpMethod.POST, notePath, otherAdmin, notes, 200);
+        assertThat(saved.path("recordedBy").asLong()).isEqualTo(otherAdmin);
+        assertThat(saved.path("recordedAt").isTextual()).isTrue();
+        assertThat(saved.path("workDone").asText()).isEqualTo("已联系司机");
+        var done = call(HttpMethod.GET, path, admin, null, 200);
+        assertThat(done.path("availableActions")).isEmpty();
+        assertThat(done.path("legacyRevocationNeedsReview").asBoolean()).isFalse();
+        assertThat(done.path("legacyRevocationNote")).isEqualTo(saved);
+        call(HttpMethod.POST, notePath, admin, notes, 409);
+        assertThat(jdbc.queryForMap("SELECT * FROM violation_work_order WHERE id=?", orderId)).isEqualTo(original);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM operation_log WHERE target_id=? AND action='DISPATCH_LEGACY_REVOCATION'",
+                Integer.class, orderId)).isEqualTo(1);
     }
 
     private int score() throws Exception {

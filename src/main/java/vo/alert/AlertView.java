@@ -26,6 +26,8 @@ public class AlertView {
     private boolean violation;
     private String status;
     private Long pendingAppealId;
+    private Long workOrderId;
+    private Long latestReviewId;
     private Double speedKmh;
     private String speedStatus;
     private String keyFrameUrl;

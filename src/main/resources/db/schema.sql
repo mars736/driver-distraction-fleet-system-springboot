@@ -473,6 +473,14 @@ CREATE TABLE IF NOT EXISTS violation_work_order (
     CONSTRAINT fk_work_order_alert FOREIGN KEY (alert_id) REFERENCES alert_record(id) ON DELETE CASCADE
 ) COMMENT '违规告警处置工单';
 
+CREATE TABLE IF NOT EXISTS work_order_legacy_revocation_note (
+    work_order_id BIGINT PRIMARY KEY,
+    work_done VARCHAR(500) NOT NULL,
+    resolution VARCHAR(500) NOT NULL,
+    recorded_by BIGINT NOT NULL,
+    recorded_at DATETIME(3) NOT NULL
+) COMMENT '历史撤销工单补记';
+
 CREATE TABLE IF NOT EXISTS dispatch_operator_location (
     user_id BIGINT PRIMARY KEY,
     latitude DOUBLE NOT NULL,

@@ -12,7 +12,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    USE driver_fleet;
    ```
 
-   新库执行 `src/main/resources/db/schema.sql`，创建三十三张业务表。已有申诉模块的数据库按顺序执行以下迁移。更旧的数据库先执行告警复核及申诉迁移。应用启动时不会自动执行这些脚本。
+   新库执行 `src/main/resources/db/schema.sql`，创建三十四张业务表。已有申诉模块的数据库按顺序执行以下迁移。更旧的数据库先执行告警复核及申诉迁移。应用启动时不会自动执行这些脚本。
 
    - `src/main/resources/db/migrations/20261119_vehicle_telemetry.sql`
    - `src/main/resources/db/migrations/20261120_alert_key_frame_timeline.sql`
@@ -78,7 +78,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 # 权限和进程生命周期回归测试，不需要 MySQL、FFmpeg 或推理服务
 .\mvnw.cmd "-Dtest=CameraSecurityTest,FfmpegManagerTest" test
 
-# 全部常规测试：现有 contextLoads 测试需要配置可用的 MySQL 和上述三十三张表
+# 全部常规测试：现有 contextLoads 测试需要配置可用的 MySQL 和上述三十四张表
 .\mvnw.cmd test
 ```
 
