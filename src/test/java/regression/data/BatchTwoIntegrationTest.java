@@ -185,8 +185,10 @@ class BatchTwoIntegrationTest {
             var row = workbook.getSheetAt(0).getRow(1);
             assertThat(row.getCell(8).getNumericCellValue()).isEqualTo(1);
             assertThat(row.getCell(10).getNumericCellValue()).isEqualTo(1);
-            assertThat(workbook.getSheet("取数信息").getRow(0).getCell(1).getLocalDateTimeCellValue())
-                    .isEqualTo(dataAsOf);
+            var metadata = workbook.getSheet("取数信息");
+            assertThat(metadata.getRow(0).getCell(1).getLocalDateTimeCellValue()).isEqualTo(dataAsOf);
+            assertThat(metadata.getRow(1).getCell(1).getLocalDateTimeCellValue()).isAfterOrEqualTo(dataAsOf);
+            assertThat(metadata.getRow(2).getCell(1).getStringCellValue()).isEqualTo(month.toString());
         }
 
         revokeAlert(secondRecognition);

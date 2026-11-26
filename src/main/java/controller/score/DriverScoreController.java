@@ -27,6 +27,10 @@ public class DriverScoreController {
     public Result<PageResult<ScoreRecordView>> records(@PathVariable long driverId, @Valid @ModelAttribute ScoreQueryRequest request) {
         return Result.success(service.records(driverId, request));
     }
+    @GetMapping("/drivers/{driverId}/detail")
+    public Result<DriverScoreService.Detail> detail(@PathVariable long driverId, @Valid @ModelAttribute ScoreQueryRequest request) {
+        return Result.success(service.detail(driverId, request));
+    }
     @GetMapping("/ranking")
     public Result<PageResult<DriverScoreView>> ranking(@Valid @ModelAttribute ScoreQueryRequest request) {
         return Result.success(service.ranking(request));

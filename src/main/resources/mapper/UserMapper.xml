@@ -114,4 +114,15 @@
         UPDATE sys_user SET token_version = #{tokenVersion} WHERE id = #{id}
     </update>
 
+    <select id="hasDriverHistory" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM alert_record WHERE driver_id = #{id})
+            OR EXISTS(SELECT 1 FROM recognition_record WHERE driver_id = #{id})
+            OR EXISTS(SELECT 1 FROM alert_appeal WHERE driver_id = #{id})
+            OR EXISTS(SELECT 1 FROM transport_task WHERE driver_id = #{id})
+            OR EXISTS(SELECT 1 FROM driver_shift WHERE driver_id = #{id})
+            OR EXISTS(SELECT 1 FROM driver_leave WHERE driver_id = #{id})
+            OR EXISTS(SELECT 1 FROM vehicle_telemetry WHERE driver_id = #{id})
+            OR EXISTS(SELECT 1 FROM operation_log WHERE actor_id = #{id})
+            OR EXISTS(SELECT 1 FROM operation_log WHERE target_type IN ('DRIVER', 'USER') AND target_id = #{id})
+    </select>
 </mapper>

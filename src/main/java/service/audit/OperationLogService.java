@@ -57,7 +57,7 @@ public class OperationLogService {
     public void loginFailure(User user, LoginFailure failure) {
         try {
             Long id = user == null ? null : user.getId();
-            record(OperationAction.AUTH_LOGIN, id, id, user == null ? null : user.getFleetId(), false, failure.name());
+            record(OperationAction.AUTH_LOGIN, null, id, user == null ? null : user.getFleetId(), false, failure.name());
         } catch (DataAccessException ex) {
             log.warn("登录失败审计写入异常，异常类型={}", ex.getClass().getSimpleName());
         }
@@ -65,18 +65,21 @@ public class OperationLogService {
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PageResult<OperationLog> list(Long fleetId, Long actorId, OperationAction action, Long targetId,
+                                        String targetType, String requestId,
                                         LocalDateTime startTime, LocalDateTime endTime, int page, int pageSize) {
         if (!CommonConstant.ROLE_PLATFORM_ADMIN.equals(UserContext.get().role())) {
             throw new BusinessException(403, "仅管理员可查看操作日志");
         }
         if ((fleetId != null && fleetId < 1) || (actorId != null && actorId < 1)
+                || (requestId != null && !requestId.matches("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}"))
+                || (targetType != null && !targetType.matches("[A-Z][A-Z_]{0,39}"))
                 || (targetId != null && targetId < 1) || page < 1 || pageSize < 1 || pageSize > 100
                 || (startTime != null && endTime != null && !startTime.isBefore(endTime))) {
             throw new BusinessException(400, "操作日志查询条件无效");
         }
         String code = action == null ? null : action.name();
-        long total = mapper.count(fleetId, actorId, code, targetId, startTime, endTime);
-        var rows = mapper.list(fleetId, actorId, code, targetId, startTime, endTime, (page - 1L) * pageSize, pageSize);
+        long total = mapper.count(fleetId, actorId, code, targetId, targetType, requestId, startTime, endTime);
+        var rows = mapper.list(fleetId, actorId, code, targetId, targetType, requestId, startTime, endTime, (page - 1L) * pageSize, pageSize);
         return PageResult.of(rows, total, page, pageSize);
     }
 

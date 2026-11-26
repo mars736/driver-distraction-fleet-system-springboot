@@ -12,9 +12,11 @@ public interface OperationLogMapper {
     void insert(OperationLog row);
     List<OperationLog> list(@Param("fleetId") Long fleetId, @Param("actorId") Long actorId,
             @Param("action") String action, @Param("targetId") Long targetId,
+            @Param("targetType") String targetType, @Param("requestId") String requestId,
             @Param("startTime") LocalDateTime startTime, @Param("endTime") LocalDateTime endTime,
             @Param("offset") long offset, @Param("limit") int limit);
     long count(@Param("fleetId") Long fleetId, @Param("actorId") Long actorId,
             @Param("action") String action, @Param("targetId") Long targetId,
+            @Param("targetType") String targetType, @Param("requestId") String requestId,
             @Param("startTime") LocalDateTime startTime, @Param("endTime") LocalDateTime endTime);
 }

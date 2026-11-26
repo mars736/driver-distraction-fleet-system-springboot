@@ -24,9 +24,11 @@ public class OperationLogController {
             @RequestParam(required = false) Long actorId,
             @RequestParam(required = false) OperationAction action,
             @RequestParam(required = false) Long targetId,
+            @RequestParam(required = false) String targetType,
+            @RequestParam(required = false) String requestId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startTime,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endTime,
             @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "10") int pageSize) {
-        return Result.success(service.list(fleetId, actorId, action, targetId, startTime, endTime, page, pageSize));
+        return Result.success(service.list(fleetId, actorId, action, targetId, targetType, requestId, startTime, endTime, page, pageSize));
     }
 }

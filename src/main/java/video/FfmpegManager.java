@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -30,12 +31,17 @@ import java.util.function.Supplier;
 @RequiredArgsConstructor
 public class FfmpegManager {
     private static final int MAX_FRAME_BYTES = 8 * 1024 * 1024;
+    private static final int PREVIEW_LIMIT = 10;
+    private static final int PREVIEW_BYTE_LIMIT = 32 * 1024 * 1024;
+    private static final long PREVIEW_TTL_MS = TimeUnit.MINUTES.toMillis(15);
     private static final String MANAGED_PREFIX = "managed:";
 
     private final InferFrameQueue frameQueue;
     private final VideoCaptureProperties props;
     private final Map<Long, Capture> captures = new HashMap<>();
     private final Map<Long, Process> terminating = new HashMap<>();
+    private final LinkedHashMap<Long, Preview> previews = new LinkedHashMap<>();
+    private long previewBytes;
     private final AtomicLong frameIds = new AtomicLong();
     private ScheduledExecutorService monitor;
     private boolean closed;
@@ -98,6 +104,30 @@ public class FfmpegManager {
         return new Status(capture.receivedFrame ? "CAPTURING" : "CONNECTING", capture.lastSuccessfulFrame, null);
     }
 
+    public record Preview(long cameraId, String streamId, long frameId, long capturedAt, byte[] jpeg) { }
+
+    public synchronized List<Preview> recentPreviews(long cameraId, long configVersion) {
+        prunePreviews(System.currentTimeMillis());
+        Capture capture = captures.get(cameraId);
+        if (!previewAvailable(capture, configVersion)) { return List.of(); }
+        return previews.values().stream()
+                .filter(frame -> frame.cameraId() == cameraId && frame.streamId().equals(capture.streamId))
+                .toList().reversed();
+    }
+
+    public synchronized Preview preview(long cameraId, long configVersion, String streamId, long frameId) {
+        prunePreviews(System.currentTimeMillis());
+        Capture capture = captures.get(cameraId);
+        Preview frame = previews.get(frameId);
+        return previewAvailable(capture, configVersion) && frame != null && frame.cameraId() == cameraId
+                && frame.streamId().equals(streamId) && frame.streamId().equals(capture.streamId) ? frame : null;
+    }
+
+    private boolean previewAvailable(Capture capture, long configVersion) {
+        return capture != null && capture.policy != null && capture.process != null
+                && capture.process.isAlive() && capture.camera.getConfigVersion() == configVersion;
+    }
+
     @PreDestroy
     public synchronized void stopAll() {
         closed = true;
@@ -110,6 +140,7 @@ public class FfmpegManager {
 
     private synchronized void check() {
         if (closed) { return; }
+        prunePreviews(System.currentTimeMillis());
         long now = System.nanoTime();
         terminating.values().removeIf(process -> !process.isAlive());
         for (Capture capture : captures.values()) {
@@ -158,6 +189,7 @@ public class FfmpegManager {
         Process process = capture.process;
         capture.process = null;
         capture.streamId = null;
+        removePreviews(id);
         if (process == null) { return; }
         process.destroy();
         if (process.isAlive()) {
@@ -245,14 +277,55 @@ public class FfmpegManager {
             capture.receivedFrame = true;
             capture.failureReason = null;
             capture.delayMs = 0;
-            frameQueue.offer(new InferFrame(frameIds.incrementAndGet(), camera.getId(), camera.getVehicleId(),
+            long frameId = frameIds.incrementAndGet();
+            if (capture.policy != null) {
+                retainPreview(new Preview(camera.getId(), streamId, frameId, capturedAt, jpeg));
+            }
+            frameQueue.offer(new InferFrame(frameId, camera.getId(), camera.getVehicleId(),
                     driver, capturedAt, jpeg, streamId));
             return true;
         }
     }
 
+    private void retainPreview(Preview frame) {
+        previews.put(frame.frameId(), frame);
+        previewBytes += frame.jpeg().length;
+        long cameraFrameCount = previews.values().stream().filter(it -> it.cameraId() == frame.cameraId()).count();
+        if (cameraFrameCount > PREVIEW_LIMIT) {
+            var oldest = previews.values().stream().filter(it -> it.cameraId() == frame.cameraId()).findFirst().orElseThrow();
+            previewBytes -= previews.remove(oldest.frameId()).jpeg().length;
+        }
+        prunePreviews(frame.capturedAt());
+        while (previewBytes > PREVIEW_BYTE_LIMIT) {
+            previewBytes -= previews.pollFirstEntry().getValue().jpeg().length;
+        }
+    }
+
+    private void prunePreviews(long now) {
+        var iterator = previews.values().iterator();
+        while (iterator.hasNext()) {
+            Preview frame = iterator.next();
+            if (frame.capturedAt() <= now - PREVIEW_TTL_MS) {
+                previewBytes -= frame.jpeg().length;
+                iterator.remove();
+            }
+        }
+    }
+
+    private void removePreviews(long cameraId) {
+        var iterator = previews.values().iterator();
+        while (iterator.hasNext()) {
+            Preview frame = iterator.next();
+            if (frame.cameraId() == cameraId) {
+                previewBytes -= frame.jpeg().length;
+                iterator.remove();
+            }
+        }
+    }
+
     private static boolean sameConfig(Camera expected, Camera current) {
-        return current != null && Objects.equals(expected.getVehicleId(), current.getVehicleId())
+        return current != null && expected.getConfigVersion() == current.getConfigVersion()
+                && Objects.equals(expected.getVehicleId(), current.getVehicleId())
                 && Objects.equals(expected.getStreamUrl(), current.getStreamUrl())
                 && Objects.equals(expected.getSampleIntervalSeconds(), current.getSampleIntervalSeconds());
     }

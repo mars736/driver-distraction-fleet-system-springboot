@@ -54,5 +54,7 @@ public interface UserMapper {
 
     int updateVehicleId(@Param("id") Long id, @Param("vehicleId") Long vehicleId);
 
+    boolean hasDriverHistory(long id);
+
     int deleteById(Long id);
 }

@@ -31,6 +31,10 @@ public class DriverScoreService {
     public DriverScoreView summary(long driverId, ScoreQueryRequest request) {
         authorize(driverId);
         var period = period(request);
+        return summaryForPeriod(driverId, period);
+    }
+
+    private DriverScoreView summaryForPeriod(long driverId, ScorePeriod period) {
         var result = mapper.summary(driverId, period);
         if (result == null) { throw new BusinessException(404, "司机不存在"); }
         decorate(result, period);
@@ -43,6 +47,19 @@ public class DriverScoreService {
         var period = period(request);
         // 明细和总条数在同一只读事务内查询，避免分页期间撤销/新增造成两份结果不一致。
         if (!mapper.driverExists(driverId)) { throw new BusinessException(404, "司机不存在"); }
+        return recordsForPeriod(driverId, period, request);
+    }
+
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public Detail detail(long driverId, ScoreQueryRequest request) {
+        authorize(driverId);
+        var period = period(request);
+        return new Detail(summaryForPeriod(driverId, period), recordsForPeriod(driverId, period, request));
+    }
+
+    public record Detail(DriverScoreView summary, PageResult<ScoreRecordView> records) { }
+
+    private PageResult<ScoreRecordView> recordsForPeriod(long driverId, ScorePeriod period, ScoreQueryRequest request) {
         return PageResult.of(mapper.records(driverId, period, offset(request), request.getPageSize()),
                 mapper.countRecords(driverId, period), request.getPage(), request.getPageSize());
     }

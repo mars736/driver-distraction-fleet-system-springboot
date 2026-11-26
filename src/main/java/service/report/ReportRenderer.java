@@ -34,13 +34,14 @@ class ReportRenderer {
     }
 
     void render(ReportFormat format, ReportTable table, LocalDateTime dataAsOf, OutputStream output) throws Exception {
+        LocalDateTime generatedAt = ReportJobService.now();
         switch (format) {
-            case XLSX -> excel(table, dataAsOf, output);
-            case PDF -> pdf(table, dataAsOf, output);
+            case XLSX -> excel(table, dataAsOf, generatedAt, output);
+            case PDF -> pdf(table, dataAsOf, generatedAt, output);
         }
     }
 
-    private void excel(ReportTable table, LocalDateTime dataAsOf, OutputStream output) throws Exception {
+    private void excel(ReportTable table, LocalDateTime dataAsOf, LocalDateTime generatedAt, OutputStream output) throws Exception {
         try (var workbook = new SXSSFWorkbook(100)) {
             var sheet = workbook.createSheet(table.title());
             var heading = workbook.createCellStyle();
@@ -73,6 +74,14 @@ class ReportRenderer {
             var snapshotRow = metadata.createRow(0);
             snapshotRow.createCell(0).setCellValue("取数时间（北京时间）");
             writeExcelCell(snapshotRow.createCell(1), dataAsOf, time);
+            var generatedRow = metadata.createRow(1);
+            generatedRow.createCell(0).setCellValue("生成时间（北京时间）");
+            writeExcelCell(generatedRow.createCell(1), generatedAt, time);
+            if (table.scoreMonth() != null) {
+                var monthRow = metadata.createRow(2);
+                monthRow.createCell(0).setCellValue("统计月份");
+                monthRow.createCell(1).setCellValue(table.scoreMonth());
+            }
             workbook.write(output);
         }
     }
@@ -92,7 +101,7 @@ class ReportRenderer {
         }
     }
 
-    private void pdf(ReportTable table, LocalDateTime dataAsOf, OutputStream output) throws Exception {
+    private void pdf(ReportTable table, LocalDateTime dataAsOf, LocalDateTime generatedAt, OutputStream output) throws Exception {
         BaseFont cjk = BaseFont.createFont(findFont(), BaseFont.IDENTITY_H, BaseFont.EMBEDDED);
         if (!cjk.charExists('报')) {
             throw new BusinessException(422, "配置的 PDF 字体缺少中文字符");
@@ -104,7 +113,12 @@ class ReportRenderer {
         document.open();
         try {
             document.add(new Paragraph(table.title(), new Font(cjk, 16, Font.BOLD)));
-            document.add(new Paragraph("取数时间（北京时间） " + TEXT_DATE.format(dataAsOf), new Font(cjk, 9)));
+            var metadataFont = new Font(cjk, 9);
+            document.add(new Paragraph("取数时间（北京时间） " + TEXT_DATE.format(dataAsOf), metadataFont));
+            document.add(new Paragraph("生成时间（北京时间） " + TEXT_DATE.format(generatedAt), metadataFont));
+            if (table.scoreMonth() != null) {
+                document.add(new Paragraph("统计月份 " + table.scoreMonth(), metadataFont));
+            }
             var grid = new PdfPTable(table.columns().size());
             grid.setWidthPercentage(100);
             grid.setSpacingBefore(12);
