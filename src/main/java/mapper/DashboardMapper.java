@@ -12,5 +12,6 @@ public interface DashboardMapper {
     List<Bucket> recognitionBuckets(Scope scope);
     Alerts alertCounts(Scope scope);
     List<RecentAlert> recentAlerts(long driverId);
+    List<RecentAlert> recentOverviewAlerts(Scope scope);
     String vehicleAlertState(long vehicleId);
 }

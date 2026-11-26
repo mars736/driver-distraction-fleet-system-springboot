@@ -45,6 +45,13 @@
         LIMIT 5
     </select>
 
+    <select id="recentOverviewAlerts" resultType="vo.dashboard.DashboardView$RecentAlert">
+        SELECT id, vehicle_id, captured_at, record_type, behavior_code, status
+        FROM alert_record
+        <include refid="dailyScope"/>
+        ORDER BY captured_at DESC, id DESC LIMIT 5
+    </select>
+
     <select id="vehicleAlertState" resultType="string">
         SELECT state_json FROM alert_vehicle_state WHERE vehicle_id = #{vehicleId}
     </select>

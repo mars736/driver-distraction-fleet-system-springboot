@@ -25,7 +25,7 @@ public final class DashboardView {
     public record RecentAlert(long id, Long vehicleId, LocalDateTime capturedAt,
                               String recordType, String behaviorCode, String status) { }
     public record Overview(LocalDate date, Long fleetId, FleetSize fleetSize,
-                           Recognitions recognitions, Alerts alerts) { }
+                           Recognitions recognitions, Alerts alerts, List<RecentAlert> recentAlerts) { }
     public record FleetRange(Long fleetId, String fleetName, LocalDateTime start, LocalDateTime end, FleetSize fleetSize,
                              Recognitions recognitions, Alerts alerts) { }
     public record VehicleDaily(LocalDate date, long vehicleId, String plateNo, Long fleetId,

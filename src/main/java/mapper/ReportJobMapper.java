@@ -9,6 +9,7 @@ import java.util.List;
 @Mapper
 public interface ReportJobMapper {
     void insert(ReportJob job);
+    ReportJob findByRequestKey(@Param("owner") long owner, @Param("key") String key);
     ReportJob byOwner(@Param("id") long id, @Param("owner") long owner);
     long count(@Param("owner") long owner);
     List<ReportJob> list(@Param("owner") long owner, @Param("offset") long offset, @Param("limit") int limit);
@@ -16,7 +17,8 @@ public interface ReportJobMapper {
     ReportJob next();
     int claim(@Param("id") long id, @Param("token") String token, @Param("now") LocalDateTime now);
     int complete(@Param("id") long id, @Param("token") String token, @Param("now") LocalDateTime now,
-                 @Param("expiry") LocalDateTime expiry, @Param("rows") int rows);
+                 @Param("expiry") LocalDateTime expiry, @Param("rows") int rows,
+                 @Param("dataAsOf") LocalDateTime dataAsOf);
     void fail(@Param("id") long id, @Param("token") String token, @Param("now") LocalDateTime now,
               @Param("message") String message);
     List<ReportJob> stuck(@Param("cutoff") LocalDateTime cutoff);

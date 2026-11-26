@@ -35,6 +35,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Scanner;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -254,6 +257,57 @@ class AlertLiveStreamIntegrationTest {
     }
 
     @Test
+    void committedTaskCompletionWinsAgainstConcurrentOfflineScan() throws Exception {
+        long vehicleId = insert("INSERT INTO vehicle(fleet_id,plate_no) VALUES (?,?)", fleet, "R" + key());
+        jdbc.update("UPDATE sys_user SET vehicle_id=? WHERE id=?", vehicleId, driverA);
+        long time = System.currentTimeMillis();
+        var departed = java.time.Instant.ofEpochMilli(time - 40_000)
+                .atZone(java.time.ZoneId.of("Asia/Shanghai")).toLocalDateTime();
+        long task = insert("""
+                INSERT INTO transport_task(driver_id,vehicle_id,fleet_id,task_type,description,starts_at,ends_at,
+                    status,created_by,created_at,departed_at) VALUES (?,?,?,'TEST','完成并发',?,?,'RUNNING',?,?,?)
+                """, driverA, vehicleId, fleet, departed, departed.plusHours(1), admin, departed, departed);
+        jdbc.update("""
+                INSERT INTO vehicle_telemetry(vehicle_id,driver_id,sampled_at,latitude,longitude)
+                VALUES (?,?,?,24.48,118.08)
+                """, vehicleId, driverA, time - 30_000);
+        var candidate = telemetry.findOfflineCandidates(java.util.List.of(vehicleId), time - 15_000).getFirst();
+        assertThat(candidate.taskId()).isEqualTo(task);
+        var completionReady = new CountDownLatch(1);
+        var scanStarted = new CountDownLatch(1);
+        try (var threads = Executors.newFixedThreadPool(2)) {
+            var completion = threads.submit(() -> new TransactionTemplate(transactions).executeWithoutResult(status -> {
+                // 任务完成与离线扫描使用同一司机行锁。
+                jdbc.queryForObject("SELECT id FROM sys_user WHERE id=? FOR UPDATE", Long.class, driverA);
+                jdbc.update("UPDATE transport_task SET status='COMPLETED' WHERE id=?", task);
+                completionReady.countDown();
+                try {
+                    assertThat(scanStarted.await(5, TimeUnit.SECONDS)).isTrue();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(interrupted);
+                }
+            }));
+            assertThat(completionReady.await(5, TimeUnit.SECONDS)).isTrue();
+            var scanned = threads.submit(() -> {
+                scanStarted.countDown();
+                offlineNotifier.notifyIfStillOffline(vehicleId, driverA, candidate.taskId(), time);
+            });
+            completion.get(8, TimeUnit.SECONDS);
+            scanned.get(8, TimeUnit.SECONDS);
+        }
+        assertThat(offlineNoticeCount(vehicleId)).isZero();
+        assertThat(telemetry.findOfflineCandidates(java.util.List.of(vehicleId), time - 15_000)).isEmpty();
+    }
+
+    @Test
+    void idleSseSendsAHeartbeatWithoutAnAlert() throws Exception {
+        try (var stream = subscribe(admin)) {
+            assertThat(stream.nextLine()).startsWith(":").contains("keepalive");
+        }
+    }
+
+    @Test
     void operationsRemindersAreEmittedAfterCommitAndOnlyToAdmins() throws Exception {
         try (var adminStream = subscribe(admin); var driverStream = subscribe(driverA)) {
             var tx = new TransactionTemplate(transactions);
@@ -330,6 +384,7 @@ class AlertLiveStreamIntegrationTest {
         assertThat(response.statusCode()).isEqualTo(200);
         assertThat(response.headers().firstValue("Content-Type")).hasValueSatisfying(
                 contentType -> assertThat(contentType).startsWith("text/event-stream"));
+        assertThat(response.headers().firstValue("X-Accel-Buffering")).hasValue("no");
         InputStream body = response.body();
         var scanner = new Scanner(body, StandardCharsets.UTF_8);
         try {

@@ -12,12 +12,14 @@ public class ReportJob {
 
     private Long id;
     private Long ownerId;
+    private String requestKey;
     private ReportType reportType;
     private ReportFormat format;
     private String filtersJson;
     private Status status;
     private LocalDateTime createdAt;
     private LocalDateTime startedAt;
+    private LocalDateTime dataAsOf;
     private LocalDateTime finishedAt;
     private LocalDateTime expiresAt;
     private String runToken;

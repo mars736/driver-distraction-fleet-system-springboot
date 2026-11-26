@@ -47,3 +47,11 @@ curl.exe -N -H "Authorization: Bearer <token>" -H "Accept: text/event-stream" ht
 使用现有告警记录表，无需数据库迁移。本阶段只提供在线页面的实时事件。
 
 平台管理员还可收到 `event: vehicle-offline`，详见[车辆定位与车速上报](vehicle-telemetry.md)。
+
+
+## 反向代理验收
+
+通过实际部署的反向代理检查 Bearer Authorization 能传到后端，SSE 响应及时送达，
+响应缓冲关闭，代理读超时能覆盖心跳间隔。验收时保持空闲连接观察心跳，跨过 60 秒连接周期重连，
+检查 `429` 后退避、注销后的断流，以及重连后通过已提交告警列表补查并去重。
+现有 SSE 为单实例推送，多实例送达及完整历史重放需要额外的共享事件源和补查能力。

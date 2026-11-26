@@ -7,6 +7,8 @@ import dto.report.ReportRequest;
 import dto.score.ScoreQueryRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 import service.alert.AlertQueryService;
 import service.dashboard.DashboardService;
 import service.recognition.RecognitionQueryService;
@@ -52,14 +54,19 @@ public class ReportDataService {
         }
     }
 
-    ReportTable load(ReportRequest request) {
-        return switch (request.type()) {
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public Snapshot load(ReportRequest request) {
+        var dataAsOf = ReportJobService.now();
+        var table = switch (request.type()) {
             case ALERT -> alertTable(request);
             case RECOGNITION -> recognitionTable(request);
             case DRIVER_SCORE -> scoreTable(request);
             case FLEET_STATISTICS -> fleetTable(request);
         };
+        return new Snapshot(table, dataAsOf);
     }
+
+    public record Snapshot(ReportTable table, LocalDateTime dataAsOf) { }
 
     private ReportTable alertTable(ReportRequest request) {
         var filter = new AlertFilterRequest();

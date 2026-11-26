@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.*;
 import service.report.ReportJobService;
 import service.report.ReportJobService.JobView;
 
+import java.util.Map;
+
 @RestController
 @RequestMapping("/api/report-jobs")
 @RequiredArgsConstructor
@@ -19,8 +21,15 @@ public class ReportJobController {
     private final ReportJobService reports;
 
     @PostMapping
-    public ResponseEntity<Result<JobView>> create(@Valid @RequestBody ReportRequest request) {
-        return ResponseEntity.accepted().body(Result.success(reports.create(request)));
+    public ResponseEntity<Result<JobView>> create(@Valid @RequestBody ReportRequest request,
+            @RequestHeader(name = "Idempotency-Key", required = false) String requestKey) {
+        return ResponseEntity.accepted().body(Result.success(reports.create(request, requestKey)));
+    }
+
+    @ExceptionHandler(ReportJobService.RequestConflict.class)
+    public ResponseEntity<Result<Map<String, String>>> requestConflict(ReportJobService.RequestConflict exception) {
+        return ResponseEntity.status(exception.getCode()).body(new Result<>(exception.getCode(), exception.getMessage(),
+                Map.of("reason", "IDEMPOTENCY_KEY_REUSED")));
     }
 
     @GetMapping
