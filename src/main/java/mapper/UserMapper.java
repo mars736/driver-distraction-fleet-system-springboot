@@ -40,7 +40,7 @@ public interface UserMapper {
 
     List<User> listDrivers(@Param("fleetId") Long fleetId,
                            @Param("keyword") String keyword,
-                           @Param("offset") int offset,
+                           @Param("offset") long offset,
                            @Param("pageSize") int pageSize);
 
     long countDrivers(@Param("fleetId") Long fleetId, @Param("keyword") String keyword);

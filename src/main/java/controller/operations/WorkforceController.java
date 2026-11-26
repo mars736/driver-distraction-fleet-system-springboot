@@ -1,5 +1,6 @@
 package controller.operations;
 
+import common.response.PageResult;
 import common.response.Result;
 import dto.operations.Workforce.*;
 import jakarta.validation.Valid;
@@ -27,6 +28,16 @@ public class WorkforceController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
         return Result.success(service.schedule(driverId, start, end));
+    }
+
+    @GetMapping("/shifts/page")
+    public Result<PageResult<DriverSchedule>> schedulePage(@RequestParam Long fleetId,
+            @RequestParam(required = false) Long driverId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int pageSize) {
+        return Result.success(service.schedulePage(fleetId, driverId, start, end, page, pageSize));
     }
 
     @PostMapping("/attendance/in")

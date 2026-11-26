@@ -23,6 +23,18 @@
         ORDER BY shift_date
     </select>
 
+    <select id="scheduleEntries" resultType="dto.operations.Workforce$ScheduleEntry">
+        SELECT s.id AS shift_id, s.driver_id, s.shift_date, s.shift_type, s.starts_at, s.ends_at,
+            s.version, a.clock_in_at, a.clock_out_at
+        FROM driver_shift s
+        LEFT JOIN driver_attendance a ON a.shift_id=s.id
+        WHERE s.shift_date&gt;=#{start} AND s.shift_date&lt;#{end} AND s.driver_id IN
+        <foreach collection="driverIds" item="driverId" open="(" separator="," close=")">
+            #{driverId}
+        </foreach>
+        ORDER BY s.driver_id, s.shift_date
+    </select>
+
     <select id="shiftOverlap" resultType="boolean">
         SELECT EXISTS(SELECT 1 FROM driver_shift WHERE driver_id=#{driverId}
             AND shift_date&lt;&gt;#{date}

@@ -1,6 +1,7 @@
 package service.operations;
 
 import common.constant.CommonConstant;
+import common.response.PageResult;
 import common.security.UserContext;
 import dto.operations.Workforce.*;
 import entity.Fleet;
@@ -90,6 +91,41 @@ public class WorkforceService {
                 .collect(Collectors.toMap(Attendance::shiftId, Function.identity()));
         return mapper.shifts(driver, start, end).stream()
                 .map(shift -> new ShiftAttendance(shift, attendance.get(shift.id()))).toList();
+    }
+
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public PageResult<DriverSchedule> schedulePage(long fleetId, Long driverId, LocalDate start, LocalDate end,
+                                                  int page, int size) {
+        admin();
+        dateRange(start, end);
+        check(!end.isAfter(start.plusDays(7)), 400, "批量排班查询最多覆盖 7 天");
+        long first = offset(page, size);
+        check(fleetId > 0 && (driverId == null || driverId > 0), 400, "车队或司机编号无效");
+        check(fleets.selectById(fleetId) != null, 404, "车队不存在");
+
+        long total;
+        List<User> drivers;
+        if (driverId == null) {
+            total = users.countDrivers(fleetId, null);
+            drivers = first < total ? users.listDrivers(fleetId, null, first, size) : List.of();
+        } else {
+            var driver = users.selectById(driverId);
+            check(driver != null && CommonConstant.ROLE_DRIVER.equals(driver.getRole())
+                    && Objects.equals(driver.getFleetId(), fleetId), 404, "该车队内未找到司机");
+            total = 1;
+            drivers = first == 0 ? List.of(driver) : List.of();
+        }
+
+        if (drivers.isEmpty()) {
+            return PageResult.of(List.of(), total, page, size);
+        }
+        var driverIds = drivers.stream().map(User::getId).toList();
+        var shiftsByDriver = mapper.scheduleEntries(driverIds, start, end).stream()
+                .collect(Collectors.groupingBy(ScheduleEntry::driverId));
+        var schedules = drivers.stream().map(driver -> new DriverSchedule(driver.getId(), driver.getName(),
+                driver.getEmployeeNo(), Boolean.TRUE.equals(driver.getEnabled()),
+                shiftsByDriver.getOrDefault(driver.getId(), List.of()))).toList();
+        return PageResult.of(schedules, total, page, size);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
