@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.FleetCareMapper">
+    <sql id="planColumns">
+        SELECT id,vehicle_id,name,interval_days,interval_km,next_date,next_odometer_km,cycle,
+            last_service_date,last_service_odometer_km,enabled FROM vehicle_maintenance_plan
+    </sql>
+
+    <sql id="repairColumns">
+        SELECT id,vehicle_id,description,status,assignee,repair_shop,cost,created_by,created_at,updated_at,
+            maintenance_plan_id,completed_on,completed_odometer_km,maintenance_cycle_applied FROM vehicle_repair
+    </sql>
+
+    <sql id="fuelIntervals">
+        , grouped_fuel AS (
+            SELECT f.*,
+                   MAX(CASE WHEN f.fill_status='FULL' THEN f.fueled_at END)
+                       OVER (PARTITION BY vehicle_id ORDER BY fueled_at,id
+                             ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prior_full
+            FROM active_fuel f
+        ), cumulative_fuel AS (
+            SELECT g.*,
+                   SUM(liters) OVER (PARTITION BY vehicle_id,prior_full) AS interval_liters,
+                   SUM(CASE WHEN fill_status='UNKNOWN' THEN 1 ELSE 0 END)
+                       OVER (PARTITION BY vehicle_id,prior_full) AS unknown_count
+            FROM grouped_fuel g
+        ), intervals AS (
+            SELECT c.id,c.vehicle_id,c.fueled_at,c.prior_full,
+                   p.odometer_km AS previous_odometer_km,c.interval_liters,
+                   CASE
+                     WHEN c.fill_status='PARTIAL' THEN 'PARTIAL'
+                     WHEN c.fill_status='UNKNOWN' THEN 'UNKNOWN_FILL'
+                     WHEN p.id IS NULL THEN 'NO_PREVIOUS'
+                     WHEN c.unknown_count&gt;0 THEN 'UNKNOWN_IN_INTERVAL'
+                     WHEN c.odometer_km&lt;=p.odometer_km THEN 'ODOMETER_INVALID'
+                     ELSE 'VALID'
+                   END AS calculation_status,
+                   CASE WHEN c.fill_status='FULL' AND c.unknown_count=0 AND c.odometer_km&gt;p.odometer_km
+                        THEN ROUND(c.interval_liters * 100 / NULLIF(c.odometer_km-p.odometer_km,0),4) END AS liters_per_100_km
+            FROM cumulative_fuel c
+            LEFT JOIN fuel_record p ON p.vehicle_id=c.vehicle_id AND p.fueled_at=c.prior_full AND p.active_marker=1
+        )
+    </sql>
+
+    <select id="odometer" resultType="dto.operations.FleetCare$Odometer">
+        SELECT vehicle_id,odometer_km,measured_at FROM vehicle_odometer WHERE vehicle_id=#{vehicleId}
+    </select>
+
+    <insert id="saveOdometer">
+        INSERT INTO vehicle_odometer(vehicle_id,odometer_km,measured_at)
+        VALUES(#{id},#{input.odometerKm},#{input.measuredAt})
+        ON DUPLICATE KEY UPDATE odometer_km=#{input.odometerKm},measured_at=#{input.measuredAt}
+    </insert>
+
+    <select id="plan" resultType="dto.operations.FleetCare$Plan" flushCache="true">
+        <include refid="planColumns"/>
+        WHERE id=#{id}
+    </select>
+
+    <select id="plans" resultType="dto.operations.FleetCare$Plan">
+        <include refid="planColumns"/>
+        WHERE vehicle_id=#{vehicleId} ORDER BY id DESC LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <insert id="createPlan">
+        INSERT INTO vehicle_maintenance_plan(vehicle_id,name,interval_days,interval_km,next_date,next_odometer_km,
+            last_service_date,last_service_odometer_km)
+        VALUES(#{vehicleId},#{input.name},#{input.intervalDays},#{input.intervalKm},#{nextDate},#{nextKm},
+            #{input.lastServiceDate},#{input.lastServiceOdometerKm})
+    </insert>
+
+    <update id="completePlan">
+        UPDATE vehicle_maintenance_plan SET next_date=#{nextDate},next_odometer_km=#{nextKm},cycle=cycle+1,
+            last_service_date=#{input.date},last_service_odometer_km=#{input.odometerKm}
+        WHERE id=#{id} AND enabled=1 AND cycle=#{input.cycle}
+    </update>
+
+    <select id="repair" resultType="dto.operations.FleetCare$Repair" flushCache="true">
+        <include refid="repairColumns"/>
+        WHERE id=#{id}
+    </select>
+
+    <select id="repairs" resultType="dto.operations.FleetCare$Repair">
+        <include refid="repairColumns"/>
+        WHERE vehicle_id=#{vehicleId} AND (#{status} IS NULL OR status=#{status})
+        ORDER BY id DESC LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <insert id="reportRepair">
+        INSERT INTO vehicle_repair(vehicle_id,description,status,created_by,created_at,updated_at,maintenance_plan_id)
+        VALUES(#{vehicleId},#{input.description},'REPORTED',#{actor},#{now},#{now},#{input.maintenancePlanId})
+    </insert>
+
+    <update id="transitionRepair">
+        UPDATE vehicle_repair SET status=#{input.status},assignee=COALESCE(#{input.assignee},assignee),
+            repair_shop=COALESCE(#{input.shop},repair_shop),cost=COALESCE(#{input.cost},cost),updated_at=#{now},
+            completed_on=CASE WHEN #{input.status}='DONE' THEN #{input.completedOn} ELSE completed_on END,
+            completed_odometer_km=CASE WHEN #{input.status}='DONE' THEN #{input.completedOdometerKm} ELSE completed_odometer_km END,
+            maintenance_cycle_applied=#{appliedCycle}
+        WHERE id=#{id} AND status=#{expected}
+    </update>
+
+    <select id="fuelTimeExists" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM fuel_record WHERE vehicle_id=#{vehicle} AND fueled_at=#{at} AND voided_at IS NULL AND id&lt;&gt;#{exceptId})
+    </select>
+
+    <select id="fuelVehicle" resultType="java.lang.Long">
+        SELECT vehicle_id FROM fuel_record WHERE id=#{id}
+    </select>
+
+    <insert id="insertFuel">
+        INSERT INTO fuel_record(vehicle_id,fueled_at,liters,unit_price,amount,odometer_km,fill_status)
+        VALUES(#{vehicleId},#{input.fueledAt},#{input.liters},#{input.unitPrice},#{amount},#{input.odometerKm},#{input.fillStatus})
+    </insert>
+
+    <update id="updateFuel">
+        UPDATE fuel_record SET fueled_at=#{input.fueledAt},liters=#{input.liters},unit_price=#{input.unitPrice},
+            amount=#{amount},odometer_km=#{input.odometerKm},fill_status=#{input.fillStatus},version=version+1
+        WHERE id=#{id} AND vehicle_id=#{vehicleId} AND version=#{input.expectedVersion} AND voided_at IS NULL
+    </update>
+
+    <select id="openRepairExists" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM vehicle_repair WHERE vehicle_id=#{vehicleId} AND status&lt;&gt;'SETTLED')
+    </select>
+
+    <update id="reopenRepair">
+        UPDATE vehicle_repair SET status='IN_REPAIR',completed_on=NULL,completed_odometer_km=NULL,updated_at=#{now}
+        WHERE id=#{id} AND status='DONE'
+    </update>
+
+    <insert id="recordRepairEvent">
+        INSERT INTO vehicle_repair_event(repair_id,from_status,to_status,reason,operator_id,operated_at,
+            completed_on,completed_odometer_km,maintenance_cycle_applied)
+        VALUES(#{snapshot.id},#{from},#{to},#{reason},#{actor},#{at},
+            #{snapshot.completedOn},#{snapshot.completedOdometerKm},#{snapshot.maintenanceCycleApplied})
+    </insert>
+
+    <select id="repairEvents" resultType="dto.operations.FleetCare$RepairEvent">
+        SELECT id,repair_id,from_status,to_status,reason,operator_id,operated_at,completed_on,completed_odometer_km,
+            maintenance_cycle_applied FROM vehicle_repair_event WHERE repair_id=#{id} ORDER BY id
+    </select>
+
+    <update id="setPlanEnabled">
+        UPDATE vehicle_maintenance_plan SET enabled=#{enabled} WHERE id=#{id}
+    </update>
+
+    <select id="fuelSnapshot" resultType="dto.operations.FleetCare$FuelSnapshot" flushCache="true">
+        SELECT id,vehicle_id,fueled_at,liters,unit_price,amount,odometer_km,fill_status,version,voided_at
+        FROM fuel_record WHERE id=#{id}
+    </select>
+
+    <update id="voidFuel">
+        UPDATE fuel_record SET voided_at=#{now},version=version+1 WHERE id=#{id}
+            AND version=#{expectedVersion} AND voided_at IS NULL
+    </update>
+
+    <insert id="recordFuelRevision">
+        INSERT INTO fuel_record_revision(fuel_id,version,action,operator_id,reason,before_json,after_json,operated_at)
+        VALUES(#{id},#{version},#{action},#{actor},#{reason},#{before},#{after},#{now})
+    </insert>
+
+    <select id="fuelRevisions" resultType="dto.operations.FleetCare$FuelRevision">
+        SELECT id,fuel_id,version,action,operator_id,reason,before_json,after_json,operated_at
+        FROM fuel_record_revision WHERE fuel_id=#{id} ORDER BY version
+    </select>
+
+    <select id="fuel" resultType="dto.operations.FleetCare$Fuel">
+        WITH active_fuel AS (
+            SELECT f.* FROM fuel_record f WHERE vehicle_id=#{vehicleId} AND fueled_at&lt;#{end} AND active_marker=1
+        )
+        <include refid="fuelIntervals"/>
+        SELECT f.id,f.vehicle_id,f.fueled_at,f.liters,f.unit_price,f.amount,f.odometer_km,
+               CASE WHEN f.fill_status='FULL' THEN i.previous_odometer_km END AS previous_odometer_km,
+               i.liters_per_100_km,f.fill_status,f.version,f.voided_at,COALESCE(i.calculation_status,'VOIDED') AS calculation_status,
+               CASE WHEN f.fill_status='FULL' THEN i.prior_full END AS interval_start,
+               CASE WHEN f.fill_status='FULL' AND i.prior_full IS NOT NULL THEN f.fueled_at END AS interval_end,
+               CASE WHEN f.fill_status='FULL' AND i.prior_full IS NOT NULL THEN i.interval_liters END AS interval_liters
+        FROM fuel_record f LEFT JOIN intervals i ON i.id=f.id
+        WHERE f.vehicle_id=#{vehicleId} AND f.fueled_at&gt;=#{start} AND f.fueled_at&lt;#{end}
+        ORDER BY f.fueled_at DESC,f.id DESC LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="peerRate" resultType="dto.operations.FleetCare$PeerRate">
+        WITH active_fuel AS (
+            SELECT f.* FROM fuel_record f JOIN vehicle v ON v.id=f.vehicle_id
+            WHERE v.fleet_id=#{fleetId} AND v.vehicle_type=#{model} AND v.id&lt;&gt;#{vehicleId}
+              AND f.fueled_at&lt;#{end} AND f.active_marker=1
+        )
+        <include refid="fuelIntervals"/>
+        SELECT COUNT(liters_per_100_km) AS samples, AVG(liters_per_100_km) AS average
+        FROM intervals WHERE fueled_at&gt;=#{start}
+    </select>
+</mapper>
