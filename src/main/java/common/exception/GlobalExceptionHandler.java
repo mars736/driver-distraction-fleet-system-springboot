@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.dao.DataIntegrityViolationException;
 
 /**
  * 全局异常处理：把业务异常和参数校验异常统一转成 Result。
@@ -31,5 +32,10 @@ public class GlobalExceptionHandler {
                 .map(f -> f.getDefaultMessage())
                 .orElse("参数错误");
         return Result.error(400, message);
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public Result<Void> handleDataIntegrity(DataIntegrityViolationException e) {
+        return Result.error(409, "数据存在关联，无法执行该操作");
     }
 }

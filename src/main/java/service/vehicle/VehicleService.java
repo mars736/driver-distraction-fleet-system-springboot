@@ -4,15 +4,21 @@ import common.constant.CommonConstant;
 import common.exception.BusinessException;
 import common.response.PageResult;
 import common.security.UserContext;
+import entity.Fleet;
+import entity.User;
 import entity.Vehicle;
 import lombok.RequiredArgsConstructor;
 import service.audit.OperationAction;
 import service.audit.OperationLogService;
 import lombok.extern.slf4j.Slf4j;
+import mapper.CameraMapper;
 import mapper.FleetMapper;
+import mapper.OperationsRecordMapper;
+import mapper.UserMapper;
 import mapper.VehicleMapper;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import service.camera.CameraCaptureCoordinator.VehicleChanged;
 import service.camera.CameraDriverBinding;
@@ -29,9 +35,12 @@ public class VehicleService {
 
     private final VehicleMapper vehicleMapper;
     private final FleetMapper fleetMapper;
+    private final UserMapper userMapper;
+    private final CameraMapper cameraMapper;
     private final OperationLogService audit;
     private final ApplicationEventPublisher events;
     private final CameraDriverBinding cameraBindings;
+    private final OperationsRecordMapper records;
 
     public PageResult<Vehicle> list(Long fleetId, Integer page, Integer pageSize) {
         int currentPage = (page == null || page < 1) ? 1 : page;
@@ -70,10 +79,11 @@ public class VehicleService {
 
     @Transactional
     public Vehicle create(Vehicle vehicle) {
-        checkFleetExists(vehicle.getFleetId());
+        requireEnabledFleet(vehicle.getFleetId());
         if (vehicleMapper.countByPlateNo(vehicle.getPlateNo(), null) > 0) {
             throw new BusinessException("车牌号已存在");
         }
+        validateMonitor(vehicle.getMonitorEnabled());
         if (vehicle.getMonitorEnabled() == null) {
             vehicle.setMonitorEnabled(1);
         }
@@ -83,13 +93,25 @@ public class VehicleService {
         return vehicle;
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Vehicle update(Vehicle vehicle) {
-        getById(vehicle.getId());
-        checkFleetExists(vehicle.getFleetId());
+        Fleet destination = requireFleet(vehicle.getFleetId());
+        Vehicle existing = records.lockVehicle(vehicle.getId());
+        if (existing == null) { throw new BusinessException(404, "车辆不存在"); }
+        if (!existing.getFleetId().equals(vehicle.getFleetId())) {
+            if (!Boolean.TRUE.equals(destination.getEnabled())) {
+                throw new BusinessException("所属车队已停用");
+            }
+            for (User bound : userMapper.listByVehicleId(vehicle.getId())) {
+                if (!vehicle.getFleetId().equals(bound.getFleetId())) {
+                    throw new BusinessException("该车还绑着其他车队的司机，请先解绑再转队");
+                }
+            }
+        }
         if (vehicleMapper.countByPlateNo(vehicle.getPlateNo(), vehicle.getId()) > 0) {
             throw new BusinessException("车牌号已存在");
         }
+        validateMonitor(vehicle.getMonitorEnabled());
         vehicleMapper.update(vehicle);
         audit.success(OperationAction.VEHICLE_UPDATE, vehicle.getId(), vehicle.getFleetId());
         events.publishEvent(new VehicleChanged(vehicle.getId(), false));
@@ -98,9 +120,8 @@ public class VehicleService {
 
     @Transactional
     public void updateMonitorEnabled(Long id, Integer monitorEnabled) {
-        if (!Integer.valueOf(0).equals(monitorEnabled) && !Integer.valueOf(1).equals(monitorEnabled)) {
-            throw new BusinessException(400, "车辆监控状态必须为 0 或 1");
-        }
+        if (monitorEnabled == null) { throw new BusinessException("监控开关不能为空"); }
+        validateMonitor(monitorEnabled);
         Vehicle vehicle = getById(id);
         vehicleMapper.updateMonitorEnabled(id, monitorEnabled);
         audit.success(OperationAction.VEHICLE_MONITOR, id, vehicle.getFleetId(),
@@ -108,18 +129,43 @@ public class VehicleService {
         events.publishEvent(new VehicleChanged(id, monitorEnabled == 0));
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void delete(Long id) {
-        Vehicle vehicle = getById(id);
+        Vehicle vehicle = records.lockVehicle(id);
+        if (vehicle == null) { throw new BusinessException(404, "车辆不存在"); }
+        if (!userMapper.listByVehicleId(id).isEmpty()) {
+            throw new BusinessException("该车还绑着司机，请先解绑");
+        }
+        if (cameraMapper.countByVehicleId(id) > 0) {
+            throw new BusinessException("该车还关联着摄像头，请先处理");
+        }
         vehicleMapper.deleteById(id);
         events.publishEvent(new VehicleChanged(id, true));
         audit.success(OperationAction.VEHICLE_DELETE, id, vehicle.getFleetId());
         log.info("删除车辆 id={}", id);
     }
 
-    private void checkFleetExists(Long fleetId) {
-        if (fleetId == null || fleetMapper.lockById(fleetId) == null) {
+    private Fleet requireFleet(Long fleetId) {
+        if (fleetId == null) {
+            throw new BusinessException("所属车队不能为空");
+        }
+        Fleet fleet = fleetMapper.lockById(fleetId);
+        if (fleet == null) {
             throw new BusinessException("所属车队不存在");
+        }
+        return fleet;
+    }
+
+    private void requireEnabledFleet(Long fleetId) {
+        Fleet fleet = requireFleet(fleetId);
+        if (!Boolean.TRUE.equals(fleet.getEnabled())) {
+            throw new BusinessException("所属车队已停用");
+        }
+    }
+
+    private void validateMonitor(Integer monitorEnabled) {
+        if (monitorEnabled != null && monitorEnabled != 0 && monitorEnabled != 1) {
+            throw new BusinessException("监控开关只能是 0 或 1");
         }
     }
 }

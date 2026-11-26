@@ -157,7 +157,9 @@ class CameraMonitoringIntegrationTest {
         TestSource restored = sources.get(cameraB);
         assertThat(restored).isNotSameAs(second);
         mvc.perform(delete("/api/vehicles/{id}", vehicle).header("Authorization", admin))
-                .andExpect(status().isOk());
+                .andExpect(jsonPath("$.code").value(400));
+        assertThat(restored.running.get()).isTrue();
+        vehicleMonitoring(0);
         assertThat(restored.running.get()).isFalse();
     }
 
