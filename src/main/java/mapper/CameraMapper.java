@@ -23,6 +23,8 @@ public interface CameraMapper {
 
     Camera selectById(Long id);
 
+    int countByVehicleId(Long vehicleId);
+
     int insert(Camera camera);
 
     int update(Camera camera);
