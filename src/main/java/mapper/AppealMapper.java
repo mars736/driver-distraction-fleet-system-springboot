@@ -4,6 +4,7 @@ import dto.alert.AppealQueryRequest;
 import entity.*;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import service.alert.AppealStatus;
 import service.alert.AppealTargetType;
 import java.util.List;
 
@@ -15,6 +16,7 @@ public interface AppealMapper {
     AppealRecord lock(@Param("id") long id);
     AppealRecord latestForTarget(@Param("type") AppealTargetType type, @Param("targetId") long targetId);
     Long pendingForAlert(@Param("alertId") long alertId);
+    Long lockDecisionEventId(@Param("appealId") long appealId, @Param("status") AppealStatus status);
     int insert(AppealRecord record);
     int finish(AppealRecord record);
     long count(@Param("q") AppealQueryRequest query, @Param("owner") Long owner);

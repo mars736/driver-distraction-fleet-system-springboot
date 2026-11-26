@@ -382,6 +382,51 @@ class AppealIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM alert_appeal_event WHERE appeal_id=?", Integer.class, id)).isEqualTo(1);
     }
 
+    @Test void successfulReviewsCanBeRecoveredAfterLosingTheResponse() throws Exception {
+        // 模拟服务端已提交，客户端未获取成功响应中的记录编号。
+        directReview(openAlert, "CONFIRMED").andExpect(status().isOk());
+        String alertPath = "/api/alerts/" + openAlert;
+        var alertResult = mvc.perform(get(alertPath).header("Authorization", adminToken)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CONFIRMED")).andReturn();
+        long originalReview = json.readTree(alertResult.getResponse().getContentAsString()).path("data").path("latestReviewId").asLong();
+        assertThat(originalReview).isPositive();
+        directReview(openAlert, "REVOKED").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.data.reason").value("ALREADY_REVIEWED"));
+        mvc.perform(get(alertPath + "/reviews").header("Authorization", adminToken))
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].id").value(originalReview))
+                .andExpect(jsonPath("$.data[0].operatorId").value(admin));
+
+        long appeal = create("ALERT", confirmedAlert, driverToken);
+        decide(appeal, "REVOKED").andExpect(status().isOk());
+        String appealPath = "/api/appeals/" + appeal;
+        var appealResult = mvc.perform(get(appealPath).header("Authorization", adminToken)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("REVOKED")).andReturn();
+        long originalDecision = json.readTree(appealResult.getResponse().getContentAsString()).path("data").path("decisionEventId").asLong();
+        assertThat(originalDecision).isPositive();
+        decide(appeal, "REVOKED").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.data.reason").value("APPEAL_ALREADY_REVIEWED"))
+                .andExpect(jsonPath("$.data.appealStatus").value("REVOKED"))
+                .andExpect(jsonPath("$.data.decisionEventId").value(originalDecision));
+        mvc.perform(get(appealPath + "/events").header("Authorization", adminToken))
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[1].id").value(originalDecision))
+                .andExpect(jsonPath("$.data[1].operatorId").value(admin));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM alert_review_record WHERE alert_id=?",
+                Integer.class, confirmedAlert)).isEqualTo(1);
+    }
+
+    @Test void withdrawnAppealReturnsItsStatusAndWithdrawalEventWhenReviewIsAttempted() throws Exception {
+        long id = create("RECOGNITION", ordinary, driverToken);
+        var result = withdraw(id, driverToken).andExpect(status().isOk()).andReturn();
+        long withdrawal = json.readTree(result.getResponse().getContentAsString()).path("data").path("decisionEventId").asLong();
+        assertThat(withdrawal).isPositive();
+        decide(id, "CONFIRMED").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.data.reason").value("APPEAL_WITHDRAWN"))
+                .andExpect(jsonPath("$.data.appealStatus").value("WITHDRAWN"))
+                .andExpect(jsonPath("$.data.decisionEventId").value(withdrawal));
+    }
+
     @Test void directAlertReviewIsBlockedWhileAppealIsPendingAndRevokedTargetCannotAppeal() throws Exception {
         long id = create("ALERT", openAlert, driverToken);
         directReview(openAlert, "CONFIRMED").andExpect(status().isConflict())

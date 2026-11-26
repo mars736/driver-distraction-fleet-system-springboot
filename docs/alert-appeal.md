@@ -116,3 +116,13 @@ Remove-Item Env:\DRIVER_FLEET_DB_TESTS
 
 材料列表返回 `availability`（`AVAILABLE` 或 `UNAVAILABLE`）。
 文件在存储中找不到或已无法读取时，材料登记仍可查看，下载返回 404。
+
+
+## 复核冲突与响应丢失
+
+申诉状态冲突沿用 HTTP 409，`data.reason` 区分 `APPEAL_WITHDRAWN`、`APPEAL_ALREADY_REVIEWED`
+和 `ALERT_STATUS_CHANGED`，并返回 `data.appealStatus`。已撤回或已复核时，
+`data.decisionEventId` 指向对应的办理事件。成功撤回或复核的响应和申诉详情也返回该编号。
+
+提交后如果未收到响应，先刷新详情和 `GET /api/appeals/{id}/events`，用 `decisionEventId`
+找到办理事件并核对操作人、时间和结论。状态冲突时按最新详情展示办理结果。

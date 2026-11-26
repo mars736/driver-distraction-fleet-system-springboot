@@ -1,5 +1,6 @@
 package dto.operations;
 
+import com.fasterxml.jackson.annotation.JsonUnwrapped;
 import jakarta.validation.constraints.*;
 
 import java.time.LocalDateTime;
@@ -12,6 +13,19 @@ public final class ViolationDispatch {
     public enum Status { PENDING, ASSIGNED, IN_PROGRESS, REVOKE_WRAPUP, CLOSED, CANCELED }
     public enum Outcome { HANDLED, NO_ACTION, REFERRED, REVOKED_WRAPUP }
     public enum PersonnelAction { TRAINING, CHANGE_SHIFT, STOP_SHIFT, DISMISSED }
+
+    public enum OrderAction { ASSIGN, ASSIGN_NEAREST, START, CLOSE, REVOCATION_WRAPUP, PERSONNEL_DECISION, RECORD_LEGACY_REVOCATION }
+
+    public record OrderFilter(@Positive Long fleetId, @Positive Long driverId, Status status, RiskLevel risk,
+                              @Positive Long alertId) { }
+
+    public record OrderPage(List<WorkOrder> records, boolean hasNext, Long nextCursor) { }
+
+    public record WorkOrderDetail(@JsonUnwrapped WorkOrder order, List<OrderAction> availableActions,
+                                  boolean legacyRevocationNeedsReview, LegacyRevocationNote legacyRevocationNote) { }
+
+    public record LegacyRevocationNote(long workOrderId, String workDone, String resolution,
+                                       long recordedBy, LocalDateTime recordedAt) { }
 
     public record Assign(@NotNull @Positive Long assigneeId) { }
     public record Close(@NotNull Outcome outcome, @NotBlank @Size(max = 500) String resolution) { }

@@ -11,8 +11,9 @@
 
 | 方法和路径 | 用途 |
 |---|---|
-| `GET /orders` | 分页筛选 `fleetId`、`driverId`、`status`、`risk`，默认第 1 页、每页 20 条 |
-| `GET /orders/{id}` | 查看工单、原告警状态、处置人与处置结果 |
+| `GET /orders` | 保持数组，支持 `fleetId`、`driverId`、`status`、`risk`、`alertId`，默认第 1 页、每页 20 条 |
+| `GET /orders/page` | 支持同样的筛选和 `pageSize`，后续参数 `beforeId` 使用上页的 `nextCursor` |
+| `GET /orders/{id}` | 查看工单、原告警状态、处置人与处置结果，含 `availableActions` 和历史撤销补记 |
 | `PUT /operator-position` | 登录的管理员上报自己的位置，正文如 `{"latitude":24.48,"longitude":118.08}` |
 | `GET /orders/{id}/candidates` | 查询启用管理员的派发排序，返回距离和未完成工单数 |
 | `POST /orders/{id}/assign` | 手动派发，正文如 `{"assigneeId":2}` |
@@ -20,6 +21,7 @@
 | `POST /orders/{id}/start` | 开始处置 |
 | `POST /orders/{id}/close` | 关闭处置中的有效告警工单，正文如 `{"outcome":"HANDLED","resolution":"已核对并完成安全沟通"}` |
 | `POST /orders/{id}/revocation-wrapup` | 管理员关闭待撤销收尾工单，正文如 `{"workDone":"已与司机沟通","resolution":"根据撤销结论停止处置"}` |
+| `POST /orders/{id}/legacy-revocation-note` | 管理员给旧版提前取消的已开始工单补记，提交 `workDone` 和 `resolution` |
 | `GET /orders/{id}/personnel-recommendation` | 查看人员调整建议、有效性及历史决定 |
 | `POST /orders/{id}/personnel-recommendation` | 审核建议，正文如 `{"action":"TRAINING","note":"安排参加安全培训"}` |
 
@@ -46,3 +48,19 @@
 工单详情包含 `revocationSource`（`DIRECT_REVIEW` 或 `APPEAL`）、`revocationReviewId`、
 `revokedAt` 和 `wrapupWorkDone`。原本已关闭的工单保留结论，通过 `alertStatus` 显示告警后续撤销。
 部署已有数据库时先执行 `20261126_alert_appeal_workflow.sql`。历史工单的原状态保持原样。
+
+
+## 告警跳转、分页和历史补记
+
+管理员的告警详情返回可空的 `workOrderId`。旧版工单列表和游标列表均可传 `alertId` 精确筛选，
+并可与车队等条件一起使用。游标列表的 `records` 按工单 ID 倒序，`hasNext` 为真时，
+将 `nextCursor` 作为下一页的 `beforeId`。返回上一页时使用此前保存的游标，变更筛选时从首页开始。
+工单详情继续返回 `alertId`，供前端从工单打开告警。
+
+`availableActions` 根据当前权限和状态返回 `ASSIGN`、`ASSIGN_NEAREST`、`START`、
+`CLOSE`、`REVOCATION_WRAPUP`、`PERSONNEL_DECISION` 或 `RECORD_LEGACY_REVOCATION` 中的适用操作。
+提交操作时服务端以最新状态为准。
+
+`legacyRevocationNeedsReview` 提示管理员核对已开始且被旧版提前取消的工单。
+管理员可以追加一次 `legacyRevocationNote`，其中保存已完成的工作、说明、补记人和实际补记时间。
+工单的取消状态、开始时间和原结论保留。已有数据库需执行 `20261126_review_work_order.sql`。

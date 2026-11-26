@@ -47,13 +47,23 @@
     <select id="list" resultType="dto.operations.ViolationDispatch$WorkOrder">
         <include refid="orderDetails"/>
         <where>
-            <if test="fleetId != null">AND a.fleet_id=#{fleetId}</if>
-            <if test="driverId != null">AND a.driver_id=#{driverId}</if>
-            <if test="status != null">AND w.status=#{status}</if>
-            <if test="risk != null">AND w.risk_level=#{risk}</if>
+            <if test="filter.fleetId != null">AND a.fleet_id=#{filter.fleetId}</if>
+            <if test="filter.driverId != null">AND a.driver_id=#{filter.driverId}</if>
+            <if test="filter.status != null">AND w.status=#{filter.status}</if>
+            <if test="filter.risk != null">AND w.risk_level=#{filter.risk}</if>
+            <if test="filter.alertId != null">AND w.alert_id=#{filter.alertId}</if>
+            <if test="beforeId != null">AND w.id &lt; #{beforeId}</if>
         </where>
         ORDER BY w.id DESC LIMIT #{size} OFFSET #{offset}
     </select>
+    <select id="legacyRevocationNote" resultType="dto.operations.ViolationDispatch$LegacyRevocationNote">
+        SELECT work_order_id,work_done,resolution,recorded_by,recorded_at
+        FROM work_order_legacy_revocation_note WHERE work_order_id=#{id}
+    </select>
+    <insert id="insertLegacyRevocationNote">
+        INSERT INTO work_order_legacy_revocation_note(work_order_id,work_done,resolution,recorded_by,recorded_at)
+        VALUES(#{workOrderId},#{workDone},#{resolution},#{recordedBy},#{recordedAt})
+    </insert>
     <select id="operators" resultType="dto.operations.ViolationDispatch$Operator">
         SELECT u.id,u.name,p.latitude,p.longitude,p.reported_at,COALESCE(w.active_orders,0)
         FROM sys_user u LEFT JOIN dispatch_operator_location p ON p.user_id=u.id
