@@ -15,6 +15,8 @@ public final class Workforce {
     public enum TaskStatus { PENDING, RUNNING, COMPLETED, CANCELED }
     public enum DutyStatus { OFF_DUTY, ON_DUTY, ON_LEAVE, ON_TASK }
 
+    public record CursorPage<T>(List<T> records, boolean hasNext, Long nextCursor) { }
+
     public record ShiftRequest(@NotNull @Positive Long driverId, @NotNull LocalDate date, @NotNull ShiftType type,
                                LocalDateTime startsAt, LocalDateTime endsAt) { }
     public record Position(@NotNull @DecimalMin("-90") @DecimalMax("90") Double latitude,

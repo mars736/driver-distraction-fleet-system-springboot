@@ -3,10 +3,14 @@ package service.operations;
 import common.constant.CommonConstant;
 import common.security.UserContext;
 import dto.operations.Workforce.*;
+import entity.Fleet;
 import entity.User;
 import lombok.RequiredArgsConstructor;
+import mapper.FleetMapper;
 import mapper.OperationsRecordMapper;
+import mapper.UserMapper;
 import mapper.WorkforceMapper;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,18 +19,27 @@ import service.audit.OperationLogService;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Objects;
 import java.util.TreeSet;
 import java.util.function.Function;
+import java.util.function.ToLongFunction;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static service.operations.OperationsAccess.*;
+import static service.operations.WorkforceConflict.Reason.*;
+import static service.operations.WorkforceConflict.require;
 
 @Service
 @RequiredArgsConstructor
 public class WorkforceService {
+    private static final Pattern REQUEST_KEY = Pattern.compile("[A-Za-z0-9._:-]{1,128}");
+
     private final WorkforceMapper mapper;
+    private final FleetMapper fleets;
+    private final UserMapper users;
     private final OperationsRecordMapper records;
     private final OperationLogService audit;
 
@@ -43,6 +56,9 @@ public class WorkforceService {
         LocalDateTime end = input.endsAt();
         if (input.type() == ShiftType.REST) {
             check(start == null && end == null, 400, "休息班次不填写起止时间");
+            var restStart = date.atStartOfDay();
+            require(!mapper.taskConflict(driver.getId(), null, restStart, restStart.plusDays(1), now()),
+                    REST_OVERLAPS_TASK);
         } else {
             if (start == null && end == null) {
                 start = date.atTime(input.type() == ShiftType.EARLY ? 8 : 16, 0);
@@ -51,6 +67,7 @@ public class WorkforceService {
             window(start, end, 1);
             check(start.toLocalDate().equals(date), 400, "班次开始时间应在排班当天");
             check(!mapper.shiftOverlap(driver.getId(), date, start, end), 409, "班次与相邻日期的排班重叠");
+            require(!mapper.leaveOverlap(driver.getId(), 0, start, end), SHIFT_OVERLAPS_LEAVE);
         }
         mapper.saveShift(driver.getId(), driver.getFleetId(), date, input.type(), start, end);
         var result = mapper.shift(driver.getId(), date);
@@ -122,8 +139,8 @@ public class WorkforceService {
         var at = now();
         if (input.approved()) {
             check(!mapper.leaveOverlap(leave.driverId(), id, leave.startsAt(), leave.endsAt()), 409, "已有重叠的获批请假");
-            check(!mapper.taskConflict(leave.driverId(), null, leave.startsAt(), leave.endsAt())
-                    && (leave.startsAt().isAfter(at) || !mapper.runningDriver(leave.driverId())), 409, "请假期间已有运输任务");
+            require(!mapper.workShiftOverlap(leave.driverId(), leave.startsAt(), leave.endsAt()), LEAVE_OVERLAPS_SHIFT);
+            require(!mapper.taskConflict(leave.driverId(), null, leave.startsAt(), leave.endsAt(), at), LEAVE_OVERLAPS_TASK);
         }
         var status = input.approved() ? LeaveStatus.APPROVED : LeaveStatus.REJECTED;
         check(mapper.decideLeave(id, status, actor, at, input.note()) == 1, 409, "审批状态已变更");
@@ -132,44 +149,97 @@ public class WorkforceService {
     }
 
     public List<Leave> leaves(Long driverId, Long fleetId, LeaveStatus status, int page, int size) {
-        return mapper.leaves(listDriver(driverId, fleetId), fleetId, status, offset(page, size), size);
+        return mapper.leaves(listDriver(driverId, fleetId), fleetId, status, null, offset(page, size), size);
+    }
+
+    public CursorPage<Leave> leavePage(Long driverId, Long fleetId, LeaveStatus status, Long beforeId, int size) {
+        var owner = listDriver(driverId, fleetId);
+        check(beforeId == null || beforeId > 0, 400, "分页游标必须为正数");
+        return cursorPage(mapper.leaves(owner, fleetId, status, beforeId, offset(1, size), size + 1), size, Leave::id);
+    }
+
+    public Leave leaveDetail(long id) {
+        var owner = listDriver(null, null);
+        check(id > 0, 400, "请假 ID 无效");
+        var leave = mapper.leave(id);
+        check(leave != null && (owner == null || leave.driverId() == owner), 404, "请假记录不存在");
+        return leave;
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public Task createTask(TaskRequest input) {
+    public Task createTask(TaskRequest input, String requestKey) {
         long actor = admin().userId();
+        check(requestKey == null || REQUEST_KEY.matcher(requestKey).matches(), 400,
+                "申请标识必须为 1—128 个字母、数字或 . _ : -");
+        input = new TaskRequest(input.driverId(), input.vehicleId(), input.type(), input.description(),
+                input.startsAt().truncatedTo(ChronoUnit.MILLIS), input.endsAt().truncatedTo(ChronoUnit.MILLIS));
         window(input.startsAt(), input.endsAt(), 366);
+        var existing = findReplay(actor, requestKey, input);
+        if (existing != null) { return existing; }
+
+        // 与定位和车队启停保持相同的加锁顺序。
+        var preview = requireDriver(users.selectById(input.driverId()));
+        var fleet = fleets.lockById(preview.getFleetId());
         var driver = lockDriver(input.driverId());
+        existing = findReplay(actor, requestKey, input);
+        if (existing != null) { return existing; }
+        verifyDispatchFleet(fleet, driver);
         long vehicle = input.vehicleId();
         verifyBinding(driver, vehicle);
         var at = now();
         check(input.endsAt().isAfter(at), 400, "任务结束时间应晚于当前时间");
+        var today = at.toLocalDate().atStartOfDay();
+        require(!mapper.restOverlap(driver.getId(), today, today.plusDays(1))
+                && !mapper.restOverlap(driver.getId(), input.startsAt(), input.endsAt()), TASK_OVERLAPS_REST);
         check(mapper.punchedOnDuty(driver.getId(), at)
                 && !mapper.onLeave(driver.getId(), at), 409, "司机当前不在岗");
-        check(!mapper.leaveOverlap(driver.getId(), 0, input.startsAt(), input.endsAt()), 409, "任务时段与请假重叠");
+        require(!mapper.leaveOverlap(driver.getId(), 0, input.startsAt(), input.endsAt()), TASK_OVERLAPS_LEAVE);
         check(!mapper.running(driver.getId(), vehicle, 0)
-                && !mapper.taskConflict(driver.getId(), vehicle, input.startsAt(), input.endsAt()),
+                && !mapper.taskConflict(driver.getId(), vehicle, input.startsAt(), input.endsAt(), at),
                 409, "司机或车辆已有冲突任务");
-        mapper.createTask(input, driver.getFleetId(), actor, at);
+        try {
+            mapper.createTask(input, driver.getFleetId(), actor, at, requestKey);
+        } catch (DuplicateKeyException duplicate) {
+            existing = findReplay(actor, requestKey, input);
+            if (existing == null) { throw duplicate; }
+            return existing;
+        }
         var task = mapper.task(records.generatedId());
         audit.success(OperationAction.TASK_CREATE, task.id(), task.fleetId());
         return task;
     }
 
+    private Task findReplay(long actor, String requestKey, TaskRequest input) {
+        if (requestKey == null) { return null; }
+        var task = mapper.taskByRequest(actor, requestKey);
+        if (task == null) { return null; }
+        require(task.driverId() == input.driverId() && task.vehicleId() == input.vehicleId()
+                && task.taskType().equals(input.type()) && task.description().equals(input.description())
+                && task.startsAt().equals(input.startsAt()) && task.endsAt().equals(input.endsAt()),
+                TASK_REQUEST_KEY_REUSED);
+        return task;
+    }
+
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public Task reportTask(long id, Position position, boolean departure) {
-        var driver = lockDriver(driver().userId());
+        long actor = driver().userId();
         var task = mapper.task(id);
-        check(task != null && task.driverId() == driver.getId(), 404, "任务不存在");
+        check(task != null && task.driverId() == actor, 404, "任务不存在");
+        var fleet = departure ? fleets.lockById(task.fleetId()) : null;
+        var driver = lockDriver(actor);
+        task = mapper.task(id);
+        check(task != null && task.driverId() == actor, 404, "任务不存在");
         validPosition(position);
         var at = now();
         if (departure) {
             if (task.status() == TaskStatus.RUNNING) { return task; }
+            require(task.status() == TaskStatus.PENDING, TASK_NOT_PENDING);
+            verifyDispatchFleet(fleet, driver);
             verifyBinding(driver, task.vehicleId());
-            check(task.status() == TaskStatus.PENDING && !at.isBefore(task.startsAt()) && at.isBefore(task.endsAt()),
-                    409, "任务暂不可出发");
-            check(!mapper.running(driver.getId(), task.vehicleId(), id)
-                    && !mapper.onLeave(driver.getId(), at), 409, "已有执行中任务或正在请假");
+            check(!at.isBefore(task.startsAt()) && at.isBefore(task.endsAt()), 409, "任务暂不可出发");
+            require(!mapper.restOverlap(driver.getId(), at, task.endsAt()), TASK_OVERLAPS_REST);
+            require(!mapper.leaveOverlap(driver.getId(), 0, at, task.endsAt()), TASK_OVERLAPS_LEAVE);
+            check(!mapper.running(driver.getId(), task.vehicleId(), id), 409, "已有执行中任务");
             check(mapper.depart(id, at, position) == 1, 409, "任务状态已变更");
         } else {
             if (task.status() == TaskStatus.COMPLETED) { return task; }
@@ -186,13 +256,33 @@ public class WorkforceService {
         var task = mapper.task(id);
         check(task != null, 404, "任务不存在");
         records.lockUser(task.driverId());
-        check(mapper.cancelTask(id, now()) == 1, 409, "只有待执行或执行中的任务可取消");
+        require(mapper.cancelTask(id, now()) == 1, TASK_NOT_PENDING);
         audit.success(OperationAction.TASK_CANCEL, id, task.fleetId());
         return mapper.task(id);
     }
 
     public List<Task> tasks(Long driverId, Long fleetId, TaskStatus status, int page, int size) {
-        return mapper.tasks(listDriver(driverId, fleetId), fleetId, status, offset(page, size), size);
+        return mapper.tasks(listDriver(driverId, fleetId), fleetId, status, null, offset(page, size), size);
+    }
+
+    public CursorPage<Task> taskPage(Long driverId, Long fleetId, TaskStatus status, Long beforeId, int size) {
+        var owner = listDriver(driverId, fleetId);
+        check(beforeId == null || beforeId > 0, 400, "分页游标必须为正数");
+        return cursorPage(mapper.tasks(owner, fleetId, status, beforeId, offset(1, size), size + 1), size, Task::id);
+    }
+
+    public Task taskDetail(long id) {
+        var owner = listDriver(null, null);
+        check(id > 0, 400, "任务 ID 无效");
+        var task = mapper.task(id);
+        check(task != null && (owner == null || task.driverId() == owner), 404, "任务不存在");
+        return task;
+    }
+
+    private static <T> CursorPage<T> cursorPage(List<T> rows, int size, ToLongFunction<T> id) {
+        boolean hasNext = rows.size() > size;
+        var records = hasNext ? List.copyOf(rows.subList(0, size)) : rows;
+        return new CursorPage<>(records, hasNext, hasNext ? id.applyAsLong(records.getLast()) : null);
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -259,10 +349,18 @@ public class WorkforceService {
     }
 
     private User lockDriver(long id) {
-        var driver = records.lockUser(id);
+        return requireDriver(records.lockUser(id));
+    }
+
+    private User requireDriver(User driver) {
         check(driver != null && CommonConstant.ROLE_DRIVER.equals(driver.getRole())
                 && Boolean.TRUE.equals(driver.getEnabled()) && driver.getFleetId() != null, 404, "未找到启用的司机");
         return driver;
+    }
+
+    private void verifyDispatchFleet(Fleet fleet, User driver) {
+        require(fleet != null && Objects.equals(fleet.getId(), driver.getFleetId()), FLEET_BINDING_CHANGED);
+        require(Boolean.TRUE.equals(fleet.getEnabled()), FLEET_STOPPED);
     }
 
     private void verifyBinding(User driver, long vehicleId) {

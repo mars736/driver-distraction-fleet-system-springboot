@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.WorkforceMapper">
+    <sql id="leaveColumns">
+        SELECT id,driver_id,fleet_id,leave_type,starts_at,ends_at,reason,status,created_at,decided_by,decided_at,decision_note
+        FROM driver_leave
+    </sql>
+
+    <sql id="taskColumns">
+        SELECT id,driver_id,vehicle_id,fleet_id,task_type,description,starts_at,ends_at,status,created_by,created_at,
+            departed_at,depart_lat,depart_lon,ended_at,end_lat,end_lon
+        FROM transport_task
+    </sql>
+
+    <select id="shift" resultType="dto.operations.Workforce$Shift">
+        SELECT id, driver_id, fleet_id, shift_date, shift_type, starts_at, ends_at
+        FROM driver_shift WHERE driver_id=#{driverId} AND shift_date=#{date}
+    </select>
+
+    <select id="shifts" resultType="dto.operations.Workforce$Shift">
+        SELECT id, driver_id, fleet_id, shift_date, shift_type, starts_at, ends_at
+        FROM driver_shift WHERE driver_id=#{driverId} AND shift_date&gt;=#{start} AND shift_date&lt;#{end}
+        ORDER BY shift_date
+    </select>
+
+    <select id="shiftOverlap" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM driver_shift WHERE driver_id=#{driverId}
+            AND shift_date&lt;&gt;#{date} AND starts_at&lt;#{end} AND ends_at&gt;#{start})
+    </select>
+
+    <insert id="saveShift">
+        INSERT INTO driver_shift(driver_id,fleet_id,shift_date,shift_type,starts_at,ends_at)
+        VALUES(#{driverId},#{fleetId},#{date},#{type},#{start},#{end})
+        ON DUPLICATE KEY UPDATE fleet_id=#{fleetId},shift_type=#{type},starts_at=#{start},ends_at=#{end}
+    </insert>
+
+    <select id="attendance" resultType="dto.operations.Workforce$Attendance">
+        SELECT shift_id,clock_in_at,clock_in_lat,clock_in_lon,clock_out_at,clock_out_lat,clock_out_lon
+        FROM driver_attendance WHERE shift_id=#{shiftId}
+    </select>
+
+    <select id="attendanceRange" resultType="dto.operations.Workforce$Attendance">
+        SELECT a.shift_id,a.clock_in_at,a.clock_in_lat,a.clock_in_lon,a.clock_out_at,a.clock_out_lat,a.clock_out_lon
+        FROM driver_attendance a JOIN driver_shift s ON s.id=a.shift_id
+        WHERE s.driver_id=#{driverId} AND s.shift_date&gt;=#{start} AND s.shift_date&lt;#{end}
+        ORDER BY s.shift_date
+    </select>
+
+    <insert id="clockIn">
+        INSERT INTO driver_attendance(shift_id,clock_in_at,clock_in_lat,clock_in_lon)
+        VALUES(#{shiftId},#{now},#{position.latitude},#{position.longitude})
+    </insert>
+
+    <update id="clockOut">
+        UPDATE driver_attendance SET clock_out_at=#{now},clock_out_lat=#{position.latitude},
+            clock_out_lon=#{position.longitude} WHERE shift_id=#{shiftId} AND clock_out_at IS NULL
+    </update>
+
+    <select id="punchedOnDuty" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM driver_shift s JOIN driver_attendance a ON a.shift_id=s.id
+            WHERE s.driver_id=#{id} AND s.starts_at&lt;=#{now} AND s.ends_at&gt;#{now} AND a.clock_out_at IS NULL)
+    </select>
+
+    <select id="onDuty" resultType="dto.operations.Workforce$DutyDriver">
+        SELECT u.id,u.fleet_id,u.name,u.vehicle_id FROM sys_user u
+        JOIN vehicle v ON v.id=u.vehicle_id AND v.fleet_id=u.fleet_id
+        JOIN fleet f ON f.id=u.fleet_id AND f.enabled=1
+        WHERE u.role='DRIVER' AND u.enabled=1 AND (#{fleetId} IS NULL OR u.fleet_id=#{fleetId})
+          AND NOT EXISTS(SELECT 1 FROM driver_shift r WHERE r.driver_id=u.id
+                         AND r.shift_type='REST' AND r.shift_date=DATE(#{now}))
+          AND EXISTS(SELECT 1 FROM driver_shift s JOIN driver_attendance a ON a.shift_id=s.id
+                     WHERE s.driver_id=u.id AND s.starts_at&lt;=#{now} AND s.ends_at&gt;#{now} AND a.clock_out_at IS NULL)
+          AND NOT EXISTS(SELECT 1 FROM driver_leave l WHERE l.driver_id=u.id AND l.status='APPROVED'
+                         AND l.starts_at&lt;=#{now} AND l.ends_at&gt;#{now})
+          AND NOT EXISTS(SELECT 1 FROM transport_task t WHERE t.status='RUNNING'
+                         AND (t.driver_id=u.id OR t.vehicle_id=u.vehicle_id))
+        ORDER BY u.id LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <!-- 写入口在取得司机行锁后重新读取，避开同一 MyBatis 会话里加锁前的缓存。 -->
+    <select id="leave" resultType="dto.operations.Workforce$Leave" flushCache="true">
+        <include refid="leaveColumns"/>
+        WHERE id=#{id}
+    </select>
+
+    <select id="leaves" resultType="dto.operations.Workforce$Leave">
+        <include refid="leaveColumns"/>
+        WHERE (#{driverId} IS NULL OR driver_id=#{driverId}) AND (#{fleetId} IS NULL OR fleet_id=#{fleetId})
+          AND (#{status} IS NULL OR status=#{status})
+          AND (#{beforeId} IS NULL OR id&lt;#{beforeId})
+        ORDER BY id DESC LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="approved" resultType="dto.operations.Workforce$Leave">
+        <include refid="leaveColumns"/>
+        WHERE driver_id=#{driverId} AND status='APPROVED' AND starts_at&lt;#{end} AND ends_at&gt;#{start}
+        ORDER BY starts_at,id
+    </select>
+
+    <select id="leaveOverlap" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM driver_leave WHERE driver_id=#{driverId} AND id&lt;&gt;#{exceptId}
+            AND status='APPROVED' AND starts_at&lt;#{end} AND ends_at&gt;#{start})
+    </select>
+
+    <select id="onLeave" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM driver_leave WHERE driver_id=#{driverId} AND status='APPROVED'
+            AND starts_at&lt;=#{now} AND ends_at&gt;#{now})
+    </select>
+
+    <insert id="requestLeave">
+        INSERT INTO driver_leave(driver_id,fleet_id,leave_type,starts_at,ends_at,reason,status,created_at)
+        VALUES(#{driverId},#{fleetId},#{input.type},#{input.startsAt},#{input.endsAt},#{input.reason},'PENDING',#{now})
+    </insert>
+
+    <update id="decideLeave">
+        UPDATE driver_leave SET status=#{status},decided_by=#{admin},decided_at=#{now},decision_note=#{note}
+        WHERE id=#{id} AND status='PENDING'
+    </update>
+
+    <select id="runningDriver" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM transport_task WHERE driver_id=#{id} AND status='RUNNING')
+    </select>
+
+    <select id="task" resultType="dto.operations.Workforce$Task" flushCache="true">
+        <include refid="taskColumns"/>
+        WHERE id=#{id}
+    </select>
+
+    <select id="tasks" resultType="dto.operations.Workforce$Task">
+        <include refid="taskColumns"/>
+        WHERE (#{driverId} IS NULL OR driver_id=#{driverId}) AND (#{fleetId} IS NULL OR fleet_id=#{fleetId})
+          AND (#{status} IS NULL OR status=#{status})
+          AND (#{beforeId} IS NULL OR id&lt;#{beforeId})
+        ORDER BY id DESC LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="actualTasks" resultType="dto.operations.Workforce$Task">
+        <include refid="taskColumns"/>
+        WHERE driver_id=#{driverId} AND departed_at&lt;#{end} AND COALESCE(ended_at,#{now})&gt;#{start}
+        ORDER BY departed_at,id
+    </select>
+
+    <select id="taskConflict" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM transport_task
+            WHERE (driver_id=#{driverId} OR vehicle_id=#{vehicleId}) AND
+                ((status='PENDING' AND starts_at&lt;#{end} AND ends_at&gt;#{start})
+                OR (status='RUNNING' AND COALESCE(departed_at,starts_at)&lt;#{end}
+                    AND (ends_at&gt;#{start} OR #{now}&gt;#{start}))))
+    </select>
+
+    <select id="running" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM transport_task WHERE status='RUNNING' AND id&lt;&gt;#{exceptId}
+            AND (driver_id=#{driverId} OR vehicle_id=#{vehicleId}))
+    </select>
+
+    <insert id="createTask">
+        INSERT INTO transport_task(driver_id,vehicle_id,fleet_id,task_type,description,starts_at,ends_at,status,created_by,created_at,request_key)
+        VALUES(#{input.driverId},#{input.vehicleId},#{fleetId},#{input.type},#{input.description},#{input.startsAt},
+            #{input.endsAt},'PENDING',#{actor},#{now},#{requestKey})
+    </insert>
+
+    <update id="depart">
+        UPDATE transport_task SET status='RUNNING',departed_at=#{now},depart_lat=#{position.latitude},
+            depart_lon=#{position.longitude} WHERE id=#{id} AND status='PENDING'
+    </update>
+
+    <update id="finishTask">
+        UPDATE transport_task SET status='COMPLETED',ended_at=#{now},end_lat=#{position.latitude},
+            end_lon=#{position.longitude} WHERE id=#{id} AND status='RUNNING'
+    </update>
+
+    <update id="cancelTask">
+        UPDATE transport_task SET status='CANCELED',ended_at=#{now}
+        WHERE id=#{id} AND status='PENDING'
+    </update>
+
+    <select id="restOverlap" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM driver_shift
+            WHERE driver_id=#{driverId} AND shift_type='REST'
+                AND shift_date&gt;=DATE(#{start}) AND CAST(shift_date AS DATETIME)&lt;#{end})
+    </select>
+
+    <select id="workShiftOverlap" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM driver_shift
+            WHERE driver_id=#{driverId} AND shift_type IN ('EARLY','LATE')
+                AND shift_date&gt;=DATE(#{start}) - INTERVAL 1 DAY
+                AND starts_at&lt;#{end} AND ends_at&gt;#{start})
+    </select>
+
+    <select id="taskByRequest" resultType="dto.operations.Workforce$Task" flushCache="true">
+        <include refid="taskColumns"/>
+        WHERE created_by=#{actor} AND request_key=#{requestKey}
+    </select>
+</mapper>

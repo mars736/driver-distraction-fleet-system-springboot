@@ -2,7 +2,7 @@
 
 ## 数据库升级
 
-已有第二批数据表的数据库执行 `src/main/resources/db/migrations/20261122_fleet_operations.sql`。新库运行完整 `schema.sql`。第三批新增十张运营表。新接口使用现有 Bearer Token，业务时间统一为北京时间。列表默认第 1 页、每页 20 条，上限 100。
+已有第二批数据表的数据库执行 `src/main/resources/db/migrations/20261122_fleet_operations.sql`。新库运行完整 `schema.sql`。第三批新增十张运营表。已有运营表的数据库另执行 `src/main/resources/db/migrations/20261126_workforce_task_attendance.sql`。新接口使用现有 Bearer Token，业务时间统一为北京时间。列表默认第 1 页、每页 20 条，上限 100。
 
 ## 排班打卡与运输任务
 
@@ -17,20 +17,39 @@
 | `GET /on-duty` | 管理员查可派任务司机，可按 `fleetId` 及 `page`、`pageSize` 筛选 |
 | `GET /status` | 司机查自己，管理员填写 `driverId`。返回 `OFF_DUTY`、`ON_DUTY`、`ON_LEAVE` 或 `ON_TASK` |
 | `POST /leaves` | 司机提交请假 |
-| `GET /leaves` | 司机查自己，可按 `status` 和页码筛选。管理员可加 `driverId`、`fleetId` |
+| `GET /leaves`、`GET /leaves/page` | 司机查自己，可按 `status` 筛选。管理员可加 `driverId`、`fleetId` |
+| `GET /leaves/{id}` | 司机查本人的请假，管理员可查指定记录 |
 | `POST /leaves/{id}/decision` | 管理员审批请假 |
-| `POST /tasks` | 管理员给当前在岗且已绑定同车队车辆的司机派任务 |
-| `GET /tasks` | 司机查自己的任务，管理员可按 `driverId`、`fleetId`、`status` 筛选 |
+| `POST /tasks` | 管理员向运营中的车队派单，司机须在岗且绑定同车队车辆 |
+| `GET /tasks`、`GET /tasks/page` | 司机查自己的任务，管理员可按 `driverId`、`fleetId`、`status` 筛选 |
+| `GET /tasks/{id}` | 司机查本人的任务，管理员可查指定记录 |
 | `POST /tasks/{id}/departure`、`POST /tasks/{id}/completion` | 任务司机提交出发、完成报到 |
-| `POST /tasks/{id}/cancel` | 管理员取消待执行或执行中的任务 |
+| `POST /tasks/{id}/cancel` | 管理员取消待执行任务 |
 
 `PUT /shifts` 示例 `{"driverId":1,"date":"2026-11-22","type":"LATE","startsAt":"2026-11-22T20:00:00","endsAt":"2026-11-23T04:00:00"}`。同一司机每天一个班次，开始日期与排班日期一致。默认早班 08:00–16:00，晚班 16:00–次日 00:00，休息 `REST` 无起止时间。自定义班次可跨午夜，最长 24 小时。已打卡的班次保留原排班。
 
-签到、签退示例 `{"shiftDate":"2026-11-22","position":{"latitude":24.48,"longitude":118.08}}`。可提前两小时签到，出勤统计以排班日期归属打卡，迟到和早退按排班起止时间判断。当前班有效、已签到且未签退，并且当前没有获批请假或执行中任务时，司机可派单。
+签到、签退示例 `{"shiftDate":"2026-11-22","position":{"latitude":24.48,"longitude":118.08}}`。可提前两小时签到，出勤统计以排班日期归属打卡，迟到和早退按排班起止时间判断。当前班有效、已签到且未签退，并且当前没有休息安排、获批请假或执行中任务时，运营车队的司机可进入派单候选。
 
-请假示例 `{"type":"PERSONAL","startsAt":"2026-11-23T08:00:00","endsAt":"2026-11-23T16:00:00","reason":"个人事务"}`。类型支持 `PERSONAL`、`SICK`、`ANNUAL`、`OTHER`，审批正文如 `{"approved":true,"note":"同意"}`。已批准的请假和冲突的运输任务不能重叠。
+请假示例 `{"type":"PERSONAL","startsAt":"2026-11-23T08:00:00","endsAt":"2026-11-23T16:00:00","reason":"个人事务"}`。类型支持 `PERSONAL`、`SICK`、`ANNUAL`、`OTHER`，审批正文如 `{"approved":true,"note":"同意"}`。已批准的请假与工作班次、冲突的运输任务不能重叠。
 
 派任务示例 `{"driverId":1,"vehicleId":11,"type":"运输","description":"送货","startsAt":"2026-11-22T20:00:00","endsAt":"2026-11-24T08:00:00"}`。同一司机或车辆的任务时间不能重叠。司机在计划时段内用 `{"latitude":24.48,"longitude":118.08}` 报到出发，任务执行期间使用任务报到入口，长任务可跨天。任务状态为 `PENDING → RUNNING → COMPLETED`，取消为 `CANCELED`。出勤合计取实际任务覆盖日期与打卡日期的并集，跨天任务和打卡同日只算一次，分别返回任务、打卡、迟到、早退、请假天数。日期范围含起点、不含终点，最长 366 天。
+
+### 任务冲突、分页与出勤边界
+
+任务、工作班和请假按北京时间 `[start, end)` 判定重叠。休息日覆盖当天 00:00 至次日 00:00。
+待执行任务按计划时间检查，执行中任务从实际出发开始，检查范围覆盖计划结束和当前进度。
+车队停运后，管理员创建任务和司机出发都会返回 409，已出发的任务仍可报到完成。
+发生冲突时可读取响应的 `data.reason`，例如 `TASK_NOT_PENDING`、`TASK_OVERLAPS_REST`、
+`REST_OVERLAPS_TASK`、`LEAVE_OVERLAPS_SHIFT`、`SHIFT_OVERLAPS_LEAVE` 和 `FLEET_STOPPED`。
+
+派单支持可选的 `Idempotency-Key` 请求头。响应丢失时，管理员用相同标识和同一份请求重试，
+返回原任务并只保留一次派单审计。相同标识搭配不同条件时返回 409，原因为 `TASK_REQUEST_KEY_REUSED`。
+任务时间按毫秒保存。
+
+原任务和请假列表保留数组响应。游标列表返回 `records`、`hasNext` 和 `nextCursor`，按 ID 倒序。
+下一页把 `nextCursor` 传为 `beforeId`。筛选状态变化时从首页刷新。
+出勤统计的 `end` 排他。打卡按班次日期、任务按实际报到区间归属，未出发即取消的任务不产生出勤。
+同日打卡和任务只合计一次。获批请假覆盖的自然日单独计数，可以与同一天的出勤同时计入各自指标。
 
 ## 保养维修和油耗
 

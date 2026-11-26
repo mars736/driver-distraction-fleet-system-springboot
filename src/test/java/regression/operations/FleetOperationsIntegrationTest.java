@@ -22,6 +22,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
@@ -147,6 +149,260 @@ class FleetOperationsIntegrationTest {
     }
 
     @Test
+    void cancellationOnlySucceedsBeforeDepartureAndNeverCreatesAttendance() throws Exception {
+        prepareOnDuty();
+        var body = taskRequest(now.minusMinutes(2), now.plusHours(1));
+        long pending = id(call(HttpMethod.POST, WORK + "/tasks", admin, body, 200));
+        String pendingPath = WORK + "/tasks/" + pending;
+        assertThat(call(HttpMethod.POST, pendingPath + "/cancel", admin, null, 200).path("status").asText())
+                .isEqualTo("CANCELED");
+        var totals = call(HttpMethod.GET, WORK + "/attendance/summary?start=" + today.minusDays(1)
+                + "&end=" + today.plusDays(1), driver, null, 200);
+        assertThat(totals.path("taskDays").asInt()).isZero();
+
+        var point = Map.of("latitude", 24.48, "longitude", 118.08);
+        long next = id(call(HttpMethod.POST, WORK + "/tasks", admin, body, 200));
+        String path = WORK + "/tasks/" + next;
+        race(() -> rawStatus(HttpMethod.POST, path + "/departure", driver, point),
+                () -> rawStatus(HttpMethod.POST, path + "/cancel", admin, null));
+        var result = call(HttpMethod.GET, path, admin, null, 200);
+        String state = result.path("status").asText();
+        assertThat(state).isIn("RUNNING", "CANCELED");
+        assertThat(result.path("departedAt").isTextual()).isEqualTo(state.equals("RUNNING"));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM operation_log WHERE action='TASK_CANCEL' AND target_id=?",
+                Integer.class, next)).isEqualTo(state.equals("CANCELED") ? 1 : 0);
+        assertThat(call(HttpMethod.POST, path + "/cancel", admin, null, 409).path("reason").asText())
+                .isEqualTo("TASK_NOT_PENDING");
+
+        if (state.equals("RUNNING")) { call(HttpMethod.POST, path + "/completion", driver, point, 200); }
+        long confirmed = id(call(HttpMethod.POST, WORK + "/tasks", admin, body, 200));
+        String confirmedPath = WORK + "/tasks/" + confirmed;
+        call(HttpMethod.POST, confirmedPath + "/departure", driver, point, 200);
+        call(HttpMethod.POST, confirmedPath + "/cancel", admin, null, 409);
+        call(HttpMethod.POST, confirmedPath + "/completion", driver, point, 200);
+        call(HttpMethod.POST, confirmedPath + "/cancel", admin, null, 409);
+    }
+
+    @Test
+    void restAndDispatchRejectEachOtherAndShareTheDriverLock() throws Exception {
+        prepareOnDuty();
+        var rest = today.plusDays(2);
+        call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(rest), 200);
+        var overlaps = taskRequest(rest.atStartOfDay().minusHours(1), rest.atStartOfDay().plusMinutes(1));
+        assertThat(call(HttpMethod.POST, WORK + "/tasks", admin, overlaps, 409).path("reason").asText())
+                .isEqualTo("TASK_OVERLAPS_REST");
+        call(HttpMethod.POST, WORK + "/tasks", admin,
+                taskRequest(rest.atStartOfDay().minusHours(1), rest.atStartOfDay()), 200);
+
+        var pending = today.plusDays(3);
+        call(HttpMethod.POST, WORK + "/tasks", admin, taskRequest(pending.atTime(8, 0), pending.atTime(10, 0)), 200);
+        assertThat(call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(pending), 409).path("reason").asText())
+                .isEqualTo("REST_OVERLAPS_TASK");
+
+        var concurrent = today.plusDays(4);
+        race(() -> rawStatus(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(concurrent)),
+                () -> rawStatus(HttpMethod.POST, WORK + "/tasks", admin,
+                        taskRequest(concurrent.atTime(8, 0), concurrent.atTime(10, 0))));
+    }
+
+    @Test
+    void departureRechecksRestAndOverdueRunningTaskBlocksRestAndLeave() throws Exception {
+        prepareOnDuty();
+        var current = id(call(HttpMethod.POST, WORK + "/tasks", admin,
+                taskRequest(now.minusMinutes(2), now.plusDays(1).plusMinutes(1)), 200));
+        var tomorrow = today.plusDays(1);
+        jdbc.update("""
+                INSERT INTO driver_shift(driver_id,fleet_id,shift_date,shift_type)
+                VALUES(?,?,?,'REST')
+                """, driver, fleet, tomorrow);
+        var point = Map.of("latitude", 24.48, "longitude", 118.08);
+        assertThat(call(HttpMethod.POST, WORK + "/tasks/" + current + "/departure", driver, point, 409)
+                .path("reason").asText()).isEqualTo("TASK_OVERLAPS_REST");
+        var departed = now.minusDays(3);
+        jdbc.update("""
+                UPDATE transport_task SET status='RUNNING', starts_at=?, ends_at=?, departed_at=? WHERE id=?
+                """, departed.minusHours(1), departed.plusHours(1), departed, current);
+        assertThat(call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(today.minusDays(1)), 409)
+                .path("reason").asText()).isEqualTo("REST_OVERLAPS_TASK");
+        var leave = requestLeave(today.minusDays(1).atStartOfDay(), now.plusMinutes(30));
+        assertThat(call(HttpMethod.POST, WORK + "/leaves/" + leave + "/decision", admin, Map.of("approved", true), 409)
+                .path("reason").asText()).isEqualTo("LEAVE_OVERLAPS_SHIFT");
+        // 次日以前的额外实际执行时间也纳入任务冲突，不受原计划结束时间限制。
+        long oldLeave = requestLeave(today.minusDays(2).atStartOfDay(), now.plusMinutes(30));
+        jdbc.update("DELETE FROM driver_attendance WHERE shift_id IN (SELECT id FROM driver_shift WHERE driver_id=?)", driver);
+        jdbc.update("DELETE FROM driver_shift WHERE driver_id=? AND shift_type<>'REST'", driver);
+        assertThat(call(HttpMethod.POST, WORK + "/leaves/" + oldLeave + "/decision", admin, Map.of("approved", true), 409)
+                .path("reason").asText()).isEqualTo("LEAVE_OVERLAPS_TASK");
+    }
+
+    @Test
+    void overnightWorkAndApprovedLeaveUseHalfOpenRangesInBothDirections() throws Exception {
+        var night = today.plusDays(2);
+        var boundary = night.plusDays(1).atTime(4, 0);
+        call(HttpMethod.PUT, WORK + "/shifts", admin,
+                workShift(night.atTime(20, 0), boundary), 200);
+        long overlaps = requestLeave(boundary.minusMinutes(1), boundary.plusHours(1));
+        long touches = requestLeave(boundary, boundary.plusHours(1));
+        var approve = Map.of("approved", true);
+        assertThat(call(HttpMethod.POST, WORK + "/leaves/" + overlaps + "/decision", admin, approve, 409)
+                .path("reason").asText()).isEqualTo("LEAVE_OVERLAPS_SHIFT");
+        call(HttpMethod.POST, WORK + "/leaves/" + touches + "/decision", admin, approve, 200);
+        assertThat(call(HttpMethod.PUT, WORK + "/shifts", admin, workShift(boundary, boundary.plusHours(2)), 409)
+                .path("reason").asText()).isEqualTo("SHIFT_OVERLAPS_LEAVE");
+
+        var concurrent = today.plusDays(5).atTime(8, 0);
+        long leave = requestLeave(concurrent, concurrent.plusHours(2));
+        race(() -> rawStatus(HttpMethod.POST, WORK + "/leaves/" + leave + "/decision", admin, approve),
+                () -> rawStatus(HttpMethod.PUT, WORK + "/shifts", admin, workShift(concurrent, concurrent.plusHours(3))));
+    }
+
+    @Test
+    void stoppedFleetRejectsNewDispatchAndDepartureButAllowsCompletion() throws Exception {
+        prepareOnDuty();
+        var body = taskRequest(now.minusMinutes(1), now.plusHours(1));
+        long task = id(call(HttpMethod.POST, WORK + "/tasks", admin, body, 200));
+        String path = WORK + "/tasks/" + task;
+        String fleetPath = "/api/fleets/" + fleet + "/enabled?enabled=";
+        var point = Map.of("latitude", 24.48, "longitude", 118.08);
+        assertThat(call(HttpMethod.GET, WORK + "/on-duty?fleetId=" + fleet, admin, null, 200)).hasSize(1);
+        call(HttpMethod.PATCH, fleetPath + "false", admin, null, 200);
+        assertThat(call(HttpMethod.GET, WORK + "/on-duty?fleetId=" + fleet, admin, null, 200)).isEmpty();
+        assertThat(call(HttpMethod.POST, WORK + "/tasks", admin, body, 409).path("reason").asText())
+                .isEqualTo("FLEET_STOPPED");
+        assertThat(call(HttpMethod.POST, path + "/departure", driver, point, 409).path("reason").asText())
+                .isEqualTo("FLEET_STOPPED");
+        call(HttpMethod.PATCH, fleetPath + "true", admin, null, 200);
+        call(HttpMethod.POST, path + "/departure", driver, point, 200);
+        call(HttpMethod.PATCH, fleetPath + "false", admin, null, 200);
+        assertThat(call(HttpMethod.POST, path + "/completion", driver, point, 200).path("status").asText())
+                .isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void dispatchRetryKeepsOneAuditAndCursorAndDetailsEnforceDriverScope() throws Exception {
+        prepareOnDuty();
+        var at = now.plusDays(3).withNano(123456789);
+        var body = taskRequest(at, at.plusHours(2));
+        String requestKey = UUID.randomUUID().toString();
+        long first;
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var a = pool.submit(() -> createWithKey(body, requestKey, 200));
+            var b = pool.submit(() -> createWithKey(body, requestKey, 200));
+            first = id(a.get(10, TimeUnit.SECONDS));
+            assertThat(id(b.get(10, TimeUnit.SECONDS))).isEqualTo(first);
+        }
+        assertThat(id(createWithKey(body, requestKey, 200))).isEqualTo(first);
+        assertThat(createWithKey(taskRequest(at, at.plusHours(3)), requestKey, 409).path("reason").asText())
+                .isEqualTo("TASK_REQUEST_KEY_REUSED");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM operation_log WHERE fleet_id=? AND action='TASK_CREATE'",
+                Integer.class, fleet)).isEqualTo(1);
+
+        call(HttpMethod.POST, WORK + "/tasks", admin, taskRequest(at.plusDays(1), at.plusDays(1).plusHours(1)), 200);
+        String tasks = WORK + "/tasks/page?pageSize=1&status=PENDING";
+        var page = call(HttpMethod.GET, tasks, driver, null, 200);
+        assertThat(page.path("hasNext").asBoolean()).isTrue();
+        call(HttpMethod.POST, WORK + "/tasks", admin, taskRequest(at.plusDays(2), at.plusDays(2).plusHours(1)), 200);
+        var next = call(HttpMethod.GET, tasks + "&beforeId=" + page.path("nextCursor").asLong(), driver, null, 200);
+        assertThat(id(next.path("records").get(0))).isEqualTo(first);
+        assertThat(next.path("hasNext").asBoolean()).isFalse();
+        call(HttpMethod.GET, tasks + "&beforeId=0", driver, null, 400);
+        call(HttpMethod.GET, WORK + "/tasks/" + first, driver, null, 200);
+        call(HttpMethod.GET, WORK + "/tasks/" + first, otherDriver, null, 404);
+
+        long olderLeave = requestLeave(at.plusDays(6), at.plusDays(6).plusHours(1));
+        long newerLeave = requestLeave(at.plusDays(7), at.plusDays(7).plusHours(1));
+        String leaves = WORK + "/leaves/page?pageSize=1";
+        var leavePage = call(HttpMethod.GET, leaves, driver, null, 200);
+        assertThat(id(leavePage.path("records").get(0))).isEqualTo(newerLeave);
+        assertThat(id(call(HttpMethod.GET, leaves + "&beforeId=" + leavePage.path("nextCursor").asLong(),
+                driver, null, 200).path("records").get(0))).isEqualTo(olderLeave);
+        assertThat(call(HttpMethod.GET, leaves, otherDriver, null, 200).path("records")).isEmpty();
+        call(HttpMethod.GET, WORK + "/leaves/" + olderLeave, admin, null, 200);
+        call(HttpMethod.GET, WORK + "/leaves/" + olderLeave, otherDriver, null, 404);
+    }
+
+    @Test
+    void attendanceCountsActualDaysAndApprovedLeaveSeparatelyWithExclusiveEnd() throws Exception {
+        var day = today.minusDays(4);
+        var end = day.plusDays(1);
+        for (var date : List.of(day, end)) {
+            long shift = id(call(HttpMethod.PUT, WORK + "/shifts", admin,
+                    workShift(date.atTime(8, 0), date.atTime(16, 0)), 200));
+            jdbc.update("""
+                    INSERT INTO driver_attendance(shift_id,clock_in_at,clock_in_lat,clock_in_lon)
+                    VALUES(?,?,24.48,118.08)
+                    """, shift, date.atTime(8, 0));
+        }
+        jdbc.update("""
+                INSERT INTO transport_task(driver_id,vehicle_id,fleet_id,task_type,description,starts_at,ends_at,status,
+                    created_by,created_at,departed_at,ended_at)
+                VALUES(?,?,?,'测试','跨午夜边界',?,?,'COMPLETED',?,?,?,?)
+                """, driver, vehicle, fleet, day.atTime(23, 30), end.atStartOfDay(), admin, day.atTime(17, 0),
+                day.atTime(23, 30), end.atStartOfDay());
+        jdbc.update("""
+                INSERT INTO driver_leave(driver_id,fleet_id,leave_type,starts_at,ends_at,reason,status,created_at)
+                VALUES(?,?,'PERSONAL',?,?,'历史请假','APPROVED',?)
+                """, driver, fleet, day.atTime(17, 0), day.atTime(18, 0), day.atStartOfDay());
+        var totals = call(HttpMethod.GET, WORK + "/attendance/summary?start=" + day + "&end=" + end, driver, null, 200);
+        assertThat(totals.path("taskDays").asInt()).isEqualTo(1);
+        assertThat(totals.path("punchDays").asInt()).isEqualTo(1);
+        assertThat(totals.path("attendedDays").asInt()).isEqualTo(1);
+        assertThat(totals.path("leaveDays").asInt()).isEqualTo(1);
+        assertThat(totals.path("attendedDates").get(0).asText()).isEqualTo(day.toString());
+        var following = call(HttpMethod.GET, WORK + "/attendance/summary?start=" + end + "&end=" + end.plusDays(1),
+                driver, null, 200);
+        assertThat(following.path("taskDays").asInt()).isZero();
+        assertThat(following.path("leaveDays").asInt()).isZero();
+    }
+
+    private void prepareOnDuty() throws Exception {
+        var starts = now.minusMinutes(20);
+        call(HttpMethod.PUT, WORK + "/shifts", admin, workShift(starts, now.plusHours(2)), 200);
+        call(HttpMethod.POST, WORK + "/attendance/in", driver, Map.of("shiftDate", starts.toLocalDate(),
+                "position", Map.of("latitude", 24.48, "longitude", 118.08)), 200);
+    }
+
+    private Map<String, Object> taskRequest(LocalDateTime starts, LocalDateTime ends) {
+        return Map.of("driverId", driver, "vehicleId", vehicle, "type", "运输", "description", "派单校验",
+                "startsAt", starts, "endsAt", ends);
+    }
+
+    private Map<String, Object> workShift(LocalDateTime starts, LocalDateTime ends) {
+        return Map.of("driverId", driver, "date", starts.toLocalDate(), "type", "LATE",
+                "startsAt", starts, "endsAt", ends);
+    }
+
+    private Map<String, Object> restRequest(LocalDate date) {
+        return Map.of("driverId", driver, "date", date, "type", "REST");
+    }
+
+    private long requestLeave(LocalDateTime starts, LocalDateTime ends) throws Exception {
+        return id(call(HttpMethod.POST, WORK + "/leaves", driver,
+                Map.of("type", "PERSONAL", "startsAt", starts, "endsAt", ends, "reason", "请假校验"), 200));
+    }
+
+    private JsonNode createWithKey(Object body, String requestKey, int expected) throws Exception {
+        var req = request(HttpMethod.POST, WORK + "/tasks").header("Authorization", "Bearer " + jwt.generateToken(admin, 0))
+                .header("Idempotency-Key", requestKey).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(body));
+        var response = mvc.perform(req).andReturn().getResponse();
+        assertThat(response.getStatus())
+                .as("派单响应 %s", response.getContentAsString(java.nio.charset.StandardCharsets.UTF_8))
+                .isEqualTo(expected);
+        return json.readTree(response.getContentAsByteArray()).path("data");
+    }
+
+    private void race(Callable<Integer> first, Callable<Integer> second) throws Exception {
+        var ready = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var a = pool.submit(() -> { ready.await(); return first.call(); });
+            var b = pool.submit(() -> { ready.await(); return second.call(); });
+            ready.countDown();
+            assertThat(List.of(a.get(10, TimeUnit.SECONDS), b.get(10, TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder(200, 409);
+        }
+    }
+
+    @Test
     void maintenanceAndCertificatesProduceDurableRemindersWithIndependentCycles() throws Exception {
         String path = CARE + "/vehicles/" + vehicle;
         call(HttpMethod.PUT, path + "/odometer", admin, Map.of("odometerKm", 1510, "measuredAt", now.minusMinutes(5)), 200);
@@ -260,7 +516,7 @@ class FleetOperationsIntegrationTest {
 
     private int rawStatus(HttpMethod method, String path, long actor, Object body) throws Exception {
         return mvc.perform(request(method, path).header("Authorization", "Bearer " + jwt.generateToken(actor, 0))
-                        .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(body)))
+                        .contentType(MediaType.APPLICATION_JSON).content(body == null ? new byte[0] : json.writeValueAsBytes(body)))
                 .andReturn().getResponse().getStatus();
     }
 
