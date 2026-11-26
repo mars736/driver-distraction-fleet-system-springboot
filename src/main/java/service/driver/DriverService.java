@@ -4,16 +4,17 @@ import common.constant.CommonConstant;
 import common.exception.BusinessException;
 import common.response.PageResult;
 import entity.User;
-import entity.Vehicle;
+import mapper.OperationsRecordMapper;
 import lombok.RequiredArgsConstructor;
 import service.audit.OperationAction;
 import service.audit.OperationLogService;
 import lombok.extern.slf4j.Slf4j;
 import mapper.FleetMapper;
 import mapper.UserMapper;
-import mapper.VehicleMapper;
+import service.vehicle.DriverVehicleBindingGuard;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -28,7 +29,8 @@ public class DriverService {
 
     private final UserMapper userMapper;
     private final FleetMapper fleetMapper;
-    private final VehicleMapper vehicleMapper;
+    private final OperationsRecordMapper records;
+    private final DriverVehicleBindingGuard bindings;
     private final PasswordEncoder passwordEncoder;
     private final OperationLogService audit;
 
@@ -50,7 +52,7 @@ public class DriverService {
         return user;
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public User create(User user) {
         checkFleetExists(user.getFleetId());
         if (user.getPhone() == null || user.getPhone().isBlank()) {
@@ -60,7 +62,7 @@ public class DriverService {
             throw new BusinessException("密码不能为空");
         }
         checkEmployeeNoUnique(user.getEmployeeNo(), null);
-        checkVehicleBelongsToFleet(user.getVehicleId(), user.getFleetId());
+        bindings.prepare(null, user.getVehicleId(), user.getFleetId(), true);
 
         user.setUsername(user.getEmployeeNo());
         user.setPassword(passwordEncoder.encode(user.getPassword()));
@@ -74,15 +76,15 @@ public class DriverService {
         return user;
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public User update(User user) {
-        User existing = getById(user.getId());
         checkFleetExists(user.getFleetId());
+        User existing = lockDriver(user.getId());
         if (user.getPhone() == null || user.getPhone().isBlank()) {
             throw new BusinessException("手机号不能为空");
         }
         checkEmployeeNoUnique(user.getEmployeeNo(), user.getId());
-        checkVehicleBelongsToFleet(user.getVehicleId(), user.getFleetId());
+        bindings.prepare(existing, user.getVehicleId(), user.getFleetId(), Boolean.TRUE.equals(existing.getEnabled()));
 
         user.setUsername(user.getEmployeeNo());
         boolean passwordChanged = user.getPassword() != null && !user.getPassword().isBlank();
@@ -99,24 +101,26 @@ public class DriverService {
         return user;
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void updateStatus(Long id, boolean enabled) {
-        User user = getById(id);
+        User user = lockDriver(id);
+        bindings.prepare(user, user.getVehicleId(), user.getFleetId(), enabled);
         userMapper.updateEnabled(id, enabled, user.getTokenVersion() + 1);
         audit.success(OperationAction.DRIVER_STATUS, id, user.getFleetId(), enabled ? "ENABLED" : "DISABLED");
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void updateVehicle(Long id, Long vehicleId) {
-        User user = getById(id);
-        checkVehicleBelongsToFleet(vehicleId, user.getFleetId());
+        User user = lockDriver(id);
+        bindings.prepare(user, vehicleId, user.getFleetId(), Boolean.TRUE.equals(user.getEnabled()));
         userMapper.updateVehicleId(id, vehicleId);
         audit.success(OperationAction.DRIVER_BIND_VEHICLE, id, user.getFleetId(), vehicleId == null ? "UNBOUND" : "BOUND");
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void delete(Long id) {
-        User user = getById(id);
+        User user = lockDriver(id);
+        bindings.prepare(user, null, user.getFleetId(), false);
         userMapper.deleteById(id);
         audit.success(OperationAction.DRIVER_DELETE, id, user.getFleetId());
         log.info("删除司机 id={}", id);
@@ -137,16 +141,11 @@ public class DriverService {
         }
     }
 
-    private void checkVehicleBelongsToFleet(Long vehicleId, Long fleetId) {
-        if (vehicleId == null) {
-            return;
+    private User lockDriver(long id) {
+        User driver = records.lockUser(id);
+        if (driver == null || !CommonConstant.ROLE_DRIVER.equals(driver.getRole())) {
+            throw new BusinessException(404, "司机不存在");
         }
-        Vehicle vehicle = vehicleMapper.selectById(vehicleId);
-        if (vehicle == null) {
-            throw new BusinessException("绑定的车辆不存在");
-        }
-        if (!fleetId.equals(vehicle.getFleetId())) {
-            throw new BusinessException("不能绑定其他车队的车辆");
-        }
+        return driver;
     }
 }

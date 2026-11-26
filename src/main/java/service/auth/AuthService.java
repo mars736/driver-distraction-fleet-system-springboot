@@ -13,10 +13,13 @@ import lombok.RequiredArgsConstructor;
 import service.audit.OperationAction;
 import service.audit.OperationLogService;
 import mapper.FleetMapper;
+import mapper.OperationsRecordMapper;
 import mapper.UserMapper;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import service.vehicle.DriverVehicleBindingGuard;
 import vo.auth.FleetOptionVO;
 import vo.auth.LoginResponse;
 import vo.auth.UserProfileVO;
@@ -47,6 +50,8 @@ public class AuthService {
 }*/
     private final JwtUtil jwtUtil;
     private final OperationLogService audit;
+    private final OperationsRecordMapper records;
+    private final DriverVehicleBindingGuard bindings;
 
     /** 注册页下拉：返回平台已启用的车队 */
     public List<FleetOptionVO> listEnabledFleets() {
@@ -161,9 +166,9 @@ public class AuthService {
     }
 
     /** 管理员禁用 / 启用账号：状态切换时 tokenVersion +1，让旧 token 立即失效 */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void setEnabled(Long id, boolean enabled, Long operatorId) {
-        User user = userMapper.selectById(id);
+        User user = records.lockUser(id);
         if (user == null) {
             throw new BusinessException(404, "用户不存在");
         }
@@ -174,6 +179,9 @@ public class AuthService {
             if ("PLATFORM_ADMIN".equals(user.getRole()) && userMapper.countEnabledAdmins() <= 1) {
                 throw new BusinessException("不能停用最后一个可用管理员");
             }
+        }
+        if ("DRIVER".equals(user.getRole())) {
+            bindings.prepare(user, user.getVehicleId(), user.getFleetId(), enabled);
         }
         userMapper.updateEnabled(id, enabled, user.getTokenVersion() + 1);
         audit.success(OperationAction.AUTH_ENABLED, id, user.getFleetId(), enabled ? "ENABLED" : "DISABLED");

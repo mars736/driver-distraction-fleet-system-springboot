@@ -13,10 +13,12 @@ import service.audit.OperationLogService;
 import lombok.extern.slf4j.Slf4j;
 import mapper.CameraMapper;
 import mapper.FleetMapper;
+import mapper.OperationsRecordMapper;
 import mapper.UserMapper;
 import mapper.VehicleMapper;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import service.camera.CameraCaptureCoordinator.VehicleChanged;
 import service.camera.CameraDriverBinding;
@@ -38,6 +40,7 @@ public class VehicleService {
     private final OperationLogService audit;
     private final ApplicationEventPublisher events;
     private final CameraDriverBinding cameraBindings;
+    private final OperationsRecordMapper records;
 
     public PageResult<Vehicle> list(Long fleetId, Integer page, Integer pageSize) {
         int currentPage = (page == null || page < 1) ? 1 : page;
@@ -90,19 +93,20 @@ public class VehicleService {
         return vehicle;
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Vehicle update(Vehicle vehicle) {
-        Vehicle existing = getById(vehicle.getId());
+        Fleet destination = requireFleet(vehicle.getFleetId());
+        Vehicle existing = records.lockVehicle(vehicle.getId());
+        if (existing == null) { throw new BusinessException(404, "车辆不存在"); }
         if (!existing.getFleetId().equals(vehicle.getFleetId())) {
-            // 转队：新车队必须启用，且不能留下跨车队的绑定司机
-            requireEnabledFleet(vehicle.getFleetId());
+            if (!Boolean.TRUE.equals(destination.getEnabled())) {
+                throw new BusinessException("所属车队已停用");
+            }
             for (User bound : userMapper.listByVehicleId(vehicle.getId())) {
                 if (!vehicle.getFleetId().equals(bound.getFleetId())) {
                     throw new BusinessException("该车还绑着其他车队的司机，请先解绑再转队");
                 }
             }
-        } else {
-            requireFleet(vehicle.getFleetId());
         }
         if (vehicleMapper.countByPlateNo(vehicle.getPlateNo(), vehicle.getId()) > 0) {
             throw new BusinessException("车牌号已存在");
@@ -116,6 +120,7 @@ public class VehicleService {
 
     @Transactional
     public void updateMonitorEnabled(Long id, Integer monitorEnabled) {
+        if (monitorEnabled == null) { throw new BusinessException("监控开关不能为空"); }
         validateMonitor(monitorEnabled);
         Vehicle vehicle = getById(id);
         vehicleMapper.updateMonitorEnabled(id, monitorEnabled);
@@ -124,9 +129,10 @@ public class VehicleService {
         events.publishEvent(new VehicleChanged(id, monitorEnabled == 0));
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void delete(Long id) {
-        Vehicle vehicle = getById(id);
+        Vehicle vehicle = records.lockVehicle(id);
+        if (vehicle == null) { throw new BusinessException(404, "车辆不存在"); }
         if (!userMapper.listByVehicleId(id).isEmpty()) {
             throw new BusinessException("该车还绑着司机，请先解绑");
         }

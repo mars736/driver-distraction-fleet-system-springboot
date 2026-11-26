@@ -10,7 +10,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import service.vehicle.VehicleService;
 import vo.telemetry.VehicleLiveStatus;
-import vo.telemetry.VehiclePosition;
+import vo.telemetry.VehicleLivePosition;
 
 import java.util.List;
 import java.util.Map;
@@ -37,23 +37,26 @@ public class VehicleLiveStatusService {
         }
 
         List<Long> vehicleIds = vehiclePage.getList().stream().map(Vehicle::getId).toList();
-        Map<Long, VehiclePosition> positions = telemetry.findLatestPositions(vehicleIds).stream()
-                .collect(Collectors.toMap(VehiclePosition::vehicleId, Function.identity()));
+        Map<Long, VehicleLivePosition> positions = telemetry.findLivePositions(vehicleIds).stream()
+                .collect(Collectors.toMap(VehicleLivePosition::vehicleId, Function.identity()));
         List<VehicleLiveStatus> statuses = vehiclePage.getList().stream()
                 .map(vehicle -> status(vehicle, positions.get(vehicle.getId()), now))
                 .toList();
         return PageResult.of(statuses, vehiclePage.getTotal(), page, pageSize);
     }
 
-    private VehicleLiveStatus status(Vehicle vehicle, VehiclePosition position, long now) {
-        if (position == null) {
-            return new VehicleLiveStatus(vehicle.getId(), vehicle.getFleetId(), vehicle.getPlateNo(),
-                    false, null, null, null, null);
-        }
+    private VehicleLiveStatus status(Vehicle vehicle, VehicleLivePosition position, long now) {
+        String locationStatus;
+        if (position.driverCount() > 1) { locationStatus = "BINDING_CONFLICT"; }
+        else if (position.driverId() == null) { locationStatus = "UNBOUND"; }
+        else if (position.sampledAt() == null) { locationStatus = "NO_SAMPLE"; }
+        else if (position.sampledAt() < now - VehicleTelemetryService.MAX_SPEED_AGE_MS) { locationStatus = "STALE"; }
+        else { locationStatus = "ONLINE"; }
 
-        boolean online = position.sampledAt() >= now - VehicleTelemetryService.MAX_SPEED_AGE_MS;
+        boolean online = "ONLINE".equals(locationStatus);
         return new VehicleLiveStatus(vehicle.getId(), vehicle.getFleetId(), vehicle.getPlateNo(),
                 online, position.sampledAt(), position.latitude(), position.longitude(),
-                online ? position.speedKmh() : null);
+                online ? position.speedKmh() : null, position.driverId(), locationStatus,
+                now, position.receivedAt(), "GCJ-02", online ? position.movementCheck(vehicle.getFleetId()) : null);
     }
 }

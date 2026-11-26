@@ -1,72 +1,107 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="mapper.VehicleTelemetryMapper">
-    <select id="lockDriverBinding" resultType="java.lang.Long">
-        SELECT u.id
-        FROM sys_user u
-        JOIN vehicle v ON v.id = u.vehicle_id AND v.fleet_id = u.fleet_id
-        WHERE u.id = #{driverId} AND v.id = #{vehicleId}
-          AND u.role = 'DRIVER' AND u.enabled = 1
-        FOR UPDATE
-    </select>
-
     <insert id="insertSample">
-        INSERT INTO vehicle_telemetry (vehicle_id, driver_id, sampled_at, latitude, longitude, speed_kmh)
-        VALUES (#{vehicleId}, #{driverId}, #{sampledAt}, #{latitude}, #{longitude}, #{speedKmh,jdbcType=DOUBLE})
+        INSERT INTO vehicle_telemetry (vehicle_id, driver_id, sampled_at, latitude, longitude, speed_kmh, received_at)
+        VALUES (#{vehicleId}, #{driverId}, #{sampledAt}, #{latitude}, #{longitude}, #{speedKmh,jdbcType=DOUBLE}, #{receivedAt})
         ON DUPLICATE KEY UPDATE sampled_at = vehicle_telemetry.sampled_at
     </insert>
 
     <select id="findSpeedAt" resultType="java.lang.Double">
-        SELECT speed_kmh
-        FROM vehicle_telemetry
+        SELECT speed_kmh FROM vehicle_telemetry
         WHERE vehicle_id = #{vehicleId} AND driver_id = #{driverId}
           AND sampled_at BETWEEN #{earliest} AND #{capturedAt}
-        ORDER BY sampled_at DESC
-        LIMIT 1
+        ORDER BY sampled_at DESC LIMIT 1
     </select>
+
     <select id="findTrack" resultType="vo.telemetry.VehiclePosition">
-        SELECT vehicle_id, driver_id, sampled_at, latitude, longitude, speed_kmh
+        SELECT vehicle_id, driver_id, sampled_at, latitude, longitude, speed_kmh, received_at
         FROM vehicle_telemetry WHERE vehicle_id = #{vehicleId}
           AND sampled_at &gt;= #{start} AND sampled_at &lt; #{end}
         ORDER BY sampled_at, driver_id LIMIT #{limit}
     </select>
-    <sql id="latestPositions">
-        SELECT vehicle_id, driver_id, sampled_at, latitude, longitude, speed_kmh
-        FROM (
-            SELECT v.id AS vehicle_id, u.id AS driver_id, t.sampled_at, t.latitude, t.longitude, t.speed_kmh,
-                   ROW_NUMBER() OVER (PARTITION BY v.id ORDER BY t.sampled_at DESC, u.id DESC) AS rn
+
+    <select id="findLatestForDriver" resultType="vo.telemetry.VehiclePosition">
+        SELECT vehicle_id, driver_id, sampled_at, latitude, longitude, speed_kmh, received_at
+        FROM vehicle_telemetry WHERE vehicle_id = #{vehicleId} AND driver_id = #{driverId}
+        ORDER BY sampled_at DESC LIMIT 1
+    </select>
+
+    <sql id="currentBinding">
+        WITH current_binding AS (
+            SELECT v.id AS vehicle_id, v.fleet_id,
+                   CASE WHEN COUNT(u.id)=1 THEN MIN(u.id) END AS driver_id, COUNT(u.id) AS driver_count
             FROM vehicle v
-            JOIN sys_user u ON u.vehicle_id = v.id AND u.fleet_id = v.fleet_id
-              AND u.role = 'DRIVER' AND u.enabled = 1
-            JOIN vehicle_telemetry t ON t.vehicle_id = v.id AND t.driver_id = u.id
-              AND t.sampled_at = (
-                  SELECT MAX(latest.sampled_at)
-                  FROM vehicle_telemetry latest
-                  WHERE latest.vehicle_id = v.id AND latest.driver_id = u.id
-              )
+            LEFT JOIN sys_user u ON u.vehicle_id=v.id AND u.fleet_id=v.fleet_id
+                AND u.role='DRIVER' AND u.enabled=1
             WHERE v.id IN
             <foreach collection="vehicleIds" item="vehicleId" open="(" separator="," close=")">
                 #{vehicleId}
             </foreach>
-        ) positions
-        WHERE rn = 1
+            GROUP BY v.id, v.fleet_id
+        )
+    </sql>
+    <sql id="latestSample">
+        t.vehicle_id=b.vehicle_id AND t.driver_id=b.driver_id AND t.sampled_at=(
+            SELECT MAX(previous.sampled_at) FROM vehicle_telemetry previous
+            WHERE previous.vehicle_id=b.vehicle_id AND previous.driver_id=b.driver_id
+        )
     </sql>
 
-    <select id="findLatestPositions" resultType="vo.telemetry.VehiclePosition">
-        <include refid="latestPositions"/>
+    <select id="findLivePositions" resultType="vo.telemetry.VehicleLivePosition">
+        <include refid="currentBinding"/>
+        SELECT b.vehicle_id, b.driver_id, b.driver_count, t.sampled_at, t.latitude, t.longitude, t.speed_kmh,
+               t.received_at, c.id AS movement_check_id, c.stopped_at, c.first_sampled_at, c.second_sampled_at, c.detected_at
+        FROM current_binding b
+        LEFT JOIN vehicle_telemetry t ON <include refid="latestSample"/>
+        LEFT JOIN fleet f ON f.id=b.fleet_id AND f.enabled=0
+        LEFT JOIN vehicle_stopped_motion_state m ON m.vehicle_id=b.vehicle_id AND m.fleet_id=f.id
+            AND m.driver_id=b.driver_id AND m.stopped_at=f.stopped_at
+        LEFT JOIN vehicle_stopped_motion_check c ON c.id=m.check_id
     </select>
 
-    <select id="findOfflineCandidates" resultType="vo.telemetry.VehiclePosition">
-        <include refid="latestPositions"/>
-          AND sampled_at &lt; #{cutoff}
-          AND NOT EXISTS (
-              SELECT 1 FROM vehicle_offline_notice n
-              WHERE n.vehicle_id = positions.vehicle_id AND n.driver_id = positions.driver_id
-                AND n.last_sampled_at = positions.sampled_at
-          )
+    <select id="findOfflineCandidates" resultType="mapper.VehicleTelemetryMapper$OfflineCandidate">
+        <include refid="currentBinding"/>
+        SELECT b.vehicle_id, b.driver_id, task.id AS task_id
+        FROM current_binding b
+        JOIN transport_task task ON task.vehicle_id=b.vehicle_id AND task.driver_id=b.driver_id
+            AND task.fleet_id=b.fleet_id AND task.status='RUNNING' AND task.departed_at IS NOT NULL
+        JOIN vehicle_telemetry t ON <include refid="latestSample"/>
+        WHERE t.sampled_at &lt; #{cutoff}
+          AND t.sampled_at &gt;= TIMESTAMPDIFF(MICROSECOND, '1970-01-01 08:00:00', task.departed_at) DIV 1000
+          AND NOT EXISTS(SELECT 1 FROM vehicle_task_offline_notice n WHERE n.task_id=task.id
+              AND n.vehicle_id=b.vehicle_id AND n.driver_id=b.driver_id AND n.last_sampled_at=t.sampled_at)
     </select>
+
+    <select id="lockRunningTask" resultType="mapper.VehicleTelemetryMapper$RunningTask">
+        SELECT id, departed_at FROM transport_task WHERE id=#{taskId} AND vehicle_id=#{vehicleId}
+            AND driver_id=#{driverId} AND fleet_id=#{fleetId} AND status='RUNNING' AND departed_at IS NOT NULL
+        FOR UPDATE
+    </select>
+
     <insert id="claimOfflineNotice">
-        INSERT IGNORE INTO vehicle_offline_notice (vehicle_id, driver_id, last_sampled_at, detected_at)
-        VALUES (#{vehicleId}, #{driverId}, #{sampledAt}, #{detectedAt})
+        INSERT IGNORE INTO vehicle_task_offline_notice (task_id,vehicle_id,driver_id,last_sampled_at,detected_at)
+        VALUES (#{taskId},#{vehicleId},#{driverId},#{sampledAt},#{detectedAt})
+    </insert>
+
+    <select id="stoppedAt" resultType="java.lang.Long">
+        SELECT stopped_at FROM fleet WHERE id=#{fleetId} AND enabled=0
+    </select>
+    <select id="motionState" resultType="mapper.VehicleTelemetryMapper$MotionState">
+        SELECT vehicle_id,fleet_id,driver_id,stopped_at,last_sampled_at,above_threshold,check_id
+        FROM vehicle_stopped_motion_state WHERE vehicle_id=#{vehicleId}
+    </select>
+    <insert id="saveMotionState">
+        INSERT INTO vehicle_stopped_motion_state(vehicle_id,fleet_id,driver_id,stopped_at,last_sampled_at,above_threshold,check_id)
+        VALUES (#{vehicleId},#{fleetId},#{driverId},#{stoppedAt},#{lastSampledAt},#{aboveThreshold},#{checkId,jdbcType=BIGINT})
+        ON DUPLICATE KEY UPDATE fleet_id=#{fleetId},driver_id=#{driverId},stopped_at=#{stoppedAt},
+            last_sampled_at=#{lastSampledAt},above_threshold=#{aboveThreshold},check_id=#{checkId,jdbcType=BIGINT}
+    </insert>
+    <delete id="clearMotionState">
+        DELETE FROM vehicle_stopped_motion_state WHERE vehicle_id=#{vehicleId}
+    </delete>
+    <insert id="insertMotionCheck">
+        INSERT INTO vehicle_stopped_motion_check(vehicle_id,fleet_id,driver_id,stopped_at,first_sampled_at,second_sampled_at,detected_at)
+        VALUES(#{vehicleId},#{fleetId},#{driverId},#{stoppedAt},#{firstSampledAt},#{secondSampledAt},#{detectedAt})
     </insert>
 </mapper>

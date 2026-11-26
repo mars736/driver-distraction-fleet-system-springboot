@@ -19,11 +19,16 @@ import service.alert.CapturedInference;
 import service.alert.VehicleSpeedProvider;
 
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -35,6 +40,7 @@ class VehicleTelemetryIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired JdbcTemplate jdbc;
     @Autowired JwtUtil jwt;
+    @Autowired ObjectMapper json;
     @Autowired VehicleSpeedProvider speeds;
     @Autowired AlertDecisionService decisions;
 
@@ -61,6 +67,8 @@ class VehicleTelemetryIntegrationTest {
         jdbc.update("DELETE FROM alert_record WHERE vehicle_id = ?", vehicle);
         jdbc.update("DELETE FROM recognition_record WHERE vehicle_id = ?", vehicle);
         jdbc.update("DELETE FROM alert_vehicle_state WHERE vehicle_id = ?", vehicle);
+        jdbc.update("DELETE FROM vehicle_stopped_motion_state WHERE vehicle_id = ?", vehicle);
+        jdbc.update("DELETE FROM vehicle_stopped_motion_check WHERE vehicle_id = ?", vehicle);
         jdbc.update("DELETE FROM vehicle_telemetry WHERE vehicle_id = ?", vehicle);
         jdbc.update("DELETE FROM sys_user WHERE fleet_id = ?", fleet);
         jdbc.update("DELETE FROM vehicle WHERE id = ?", vehicle);
@@ -118,6 +126,8 @@ class VehicleTelemetryIntegrationTest {
         String plate = UUID.randomUUID().toString().substring(0, 12);
         jdbc.update("INSERT INTO vehicle(fleet_id, plate_no) VALUES (?,?)", fleet, plate);
         long next = jdbc.queryForObject("SELECT id FROM vehicle WHERE plate_no=?", Long.class, plate);
+        jdbc.update("INSERT INTO fleet(fleet_no,name) VALUES (?,?)", plate, "另一车队");
+        long mismatchedFleet = jdbc.queryForObject("SELECT id FROM fleet WHERE fleet_no=?", Long.class, plate);
         String bearer = "Bearer " + jwt.generateToken(driver, 0);
         String unbound = "Bearer " + jwt.generateToken(otherDriver, 0);
         long admin = jdbc.queryForObject("SELECT id FROM sys_user WHERE username='admin'", Long.class);
@@ -144,12 +154,13 @@ class VehicleTelemetryIntegrationTest {
                     .andExpect(status().isNotFound());
             mvc.perform(get("/api/vehicles/{id}", next).header("Authorization", bearer))
                     .andExpect(status().isOk()).andExpect(jsonPath("$.data.id").value(next));
-            jdbc.update("UPDATE vehicle SET fleet_id=? WHERE id=?", Long.MAX_VALUE, next);
+            jdbc.update("UPDATE vehicle SET fleet_id=? WHERE id=?", mismatchedFleet, next);
             mvc.perform(get("/api/vehicles/{id}", next).header("Authorization", bearer))
                     .andExpect(status().isNotFound());
         } finally {
             jdbc.update("UPDATE sys_user SET vehicle_id=? WHERE id=?", vehicle, driver);
             jdbc.update("DELETE FROM vehicle WHERE id=?", next);
+            jdbc.update("DELETE FROM fleet WHERE id=?", mismatchedFleet);
         }
     }
 
@@ -194,6 +205,107 @@ class VehicleTelemetryIntegrationTest {
         mvc.perform(adminQuery).andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.list[0].online").value(false))
                 .andExpect(jsonPath("$.data.list[0].sampledAt").isEmpty());
+    }
+
+    @Test
+    void stoppedFleetCheckUsesNewConsecutiveSamplesAndResetsAcrossPeriods() throws Exception {
+        report(driver, sampledAt, "2").andExpect(status().isOk());
+        report(driver, sampledAt + 1, "2").andExpect(status().isOk());
+        assertThat(movementChecks()).isZero();
+
+        long start = stopFleet(true);
+        report(driver, start + 10, "2").andExpect(status().isOk());
+        report(driver, start + 10, "2").andExpect(status().isOk());
+        report(driver, start + 20, "1").andExpect(status().isOk());
+        report(driver, start + 30, "2").andExpect(status().isOk());
+        assertThat(movementChecks()).isZero();
+
+        report(driver, start + 40, "1.3888888888888888").andExpect(status().isOk());
+        report(driver, start + 50, "2").andExpect(status().isOk());
+        assertThat(movementChecks()).isZero();
+        // 晚到的历史样本仍入库，但不推进连续状态。
+        report(driver, start + 45, "2").andExpect(status().isOk());
+        assertThat(movementChecks()).isZero();
+
+        report(driver, start + 60, "2").andExpect(status().isOk());
+        report(driver, start + 70, "2").andExpect(status().isOk());
+        assertThat(movementChecks()).isEqualTo(1);
+        mvc.perform(liveStatus()).andExpect(jsonPath("$.data.list[0].coordinateSystem").value("GCJ-02"))
+                .andExpect(jsonPath("$.data.list[0].receivedAt").isNumber())
+                .andExpect(jsonPath("$.data.list[0].movementCheck.firstSampledAt").value(start + 50))
+                .andExpect(jsonPath("$.data.list[0].movementCheck.secondSampledAt").value(start + 60));
+
+        stopFleet(false);
+        mvc.perform(liveStatus()).andExpect(jsonPath("$.data.list[0].movementCheck").isEmpty());
+        long restarted = stopFleet(true);
+        long next = Math.max(restarted, start + 70) + 100;
+        report(driver, next, "2").andExpect(status().isOk());
+        assertThat(movementChecks()).isEqualTo(1);
+        report(driver, next + 1, "2").andExpect(status().isOk());
+        assertThat(movementChecks()).isEqualTo(2);
+    }
+
+    @Test
+    void historicalDoubleBindingIsReportedAndCannotTriggerMovementCheck() throws Exception {
+        long start = stopFleet(true);
+        jdbc.update("UPDATE sys_user SET vehicle_id=? WHERE id=?", vehicle, otherDriver);
+        report(driver, start + 10, "2").andExpect(status().isOk());
+        report(otherDriver, start + 20, "2").andExpect(status().isOk());
+        report(driver, start + 30, "2").andExpect(status().isOk());
+        assertThat(movementChecks()).isZero();
+        mvc.perform(liveStatus()).andExpect(jsonPath("$.data.list[0].locationStatus").value("BINDING_CONFLICT"))
+                .andExpect(jsonPath("$.data.list[0].online").value(false))
+                .andExpect(jsonPath("$.data.list[0].driverId").isEmpty())
+                .andExpect(jsonPath("$.data.list[0].latitude").isEmpty());
+
+        mvc.perform(patch("/api/drivers/{id}/vehicle", driver).header("Authorization", adminToken()))
+                .andExpect(jsonPath("$.code").value(200));
+        mvc.perform(liveStatus()).andExpect(jsonPath("$.data.list[0].driverId").value(otherDriver))
+                .andExpect(jsonPath("$.data.list[0].locationStatus").value("ONLINE"));
+        report(otherDriver, start + 40, "2").andExpect(status().isOk());
+        assertThat(movementChecks()).isZero();
+    }
+
+    @Test
+    void concurrentBindingsCanOnlyLeaveOneEnabledDriverAssigned() throws Exception {
+        jdbc.update("UPDATE sys_user SET vehicle_id=NULL WHERE id=?", driver);
+        String token = adminToken();
+        var ready = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var a = pool.submit(() -> { ready.await(); return bind(driver, token); });
+            var b = pool.submit(() -> { ready.await(); return bind(otherDriver, token); });
+            ready.countDown();
+            assertThat(java.util.List.of(a.get(6, TimeUnit.SECONDS), b.get(6, TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder(200, 409);
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sys_user WHERE enabled=1 AND vehicle_id=?",
+                Integer.class, vehicle)).isEqualTo(1);
+    }
+
+    private int bind(long driverId, String token) throws Exception {
+        var response = mvc.perform(patch("/api/drivers/{id}/vehicle", driverId).header("Authorization", token)
+                        .param("vehicleId", Long.toString(vehicle))).andReturn().getResponse();
+        return json.readTree(response.getContentAsByteArray()).path("code").asInt();
+    }
+
+    private long stopFleet(boolean stopped) throws Exception {
+        mvc.perform(patch("/api/fleets/{id}/enabled", fleet).header("Authorization", adminToken())
+                        .param("enabled", Boolean.toString(!stopped)))
+                .andExpect(jsonPath("$.code").value(200));
+        return jdbc.queryForObject("SELECT stopped_at FROM fleet WHERE id=?", Long.class, fleet);
+    }
+
+    private MockHttpServletRequestBuilder liveStatus() {
+        return get("/api/vehicles/live-status").param("fleetId", Long.toString(fleet)).header("Authorization", adminToken());
+    }
+
+    private String adminToken() {
+        var user = jdbc.queryForMap("SELECT id, token_version FROM sys_user WHERE username='admin'");
+        return "Bearer " + jwt.generateToken(((Number) user.get("id")).longValue(), ((Number) user.get("token_version")).intValue());
+    }
+
+    private long movementChecks() {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM vehicle_stopped_motion_check WHERE vehicle_id=?", Long.class, vehicle);
     }
 
     private long createDriver(String username, Long vehicleId) {

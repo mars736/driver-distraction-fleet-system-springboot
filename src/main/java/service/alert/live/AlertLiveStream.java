@@ -12,6 +12,7 @@ import mapper.UserMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import vo.telemetry.StoppedMotionCheck;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -120,6 +121,11 @@ public class AlertLiveStream {
     @TransactionalEventListener
     public void committed(OperationsReminderEvent event) {
         broadcast(new LiveEvent("operations-reminder", null, event, null));
+    }
+
+    @TransactionalEventListener
+    public void committed(StoppedMotionCheck event) {
+        broadcast(new LiveEvent("stopped-fleet-motion", null, event, null));
     }
 
     private boolean isAccountCurrent(long userId, String role, int tokenVersion) {

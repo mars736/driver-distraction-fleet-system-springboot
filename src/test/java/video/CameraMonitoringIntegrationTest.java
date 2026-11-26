@@ -132,7 +132,8 @@ class CameraMonitoringIntegrationTest {
         assertThat(afterSwap.getDriverId()).isEqualTo(secondDriver);
         assertPersistedDriver(afterSwap, secondDriver);
 
-        bind(firstDriver, vehicle);
+        // 模拟升级前已存在的重复绑定。
+        jdbc.update("UPDATE sys_user SET vehicle_id=? WHERE id=?", vehicle, firstDriver);
         InferFrame ambiguous = frame(first);
         assertThat(ambiguous.getDriverId()).isNull();
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(jdbc.queryForObject("""
@@ -157,7 +158,9 @@ class CameraMonitoringIntegrationTest {
         TestSource restored = sources.get(cameraB);
         assertThat(restored).isNotSameAs(second);
         mvc.perform(delete("/api/vehicles/{id}", vehicle).header("Authorization", admin))
-                .andExpect(status().isOk());
+                .andExpect(jsonPath("$.code").value(400));
+        assertThat(restored.running.get()).isTrue();
+        vehicleMonitoring(0);
         assertThat(restored.running.get()).isFalse();
     }
 

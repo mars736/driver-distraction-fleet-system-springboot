@@ -8,9 +8,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import service.vehicle.VehicleService;
 
-import java.util.function.Function;
-import java.util.stream.Collectors;
-
 @Component
 @ConditionalOnProperty(name = "telemetry.offline-monitor.enabled", matchIfMissing = true)
 @RequiredArgsConstructor
@@ -29,12 +26,12 @@ public class VehicleOfflineMonitor {
             var batch = vehicles.list(null, page, PAGE_SIZE);
             var monitored = batch.getList().stream()
                     .filter(vehicle -> Integer.valueOf(1).equals(vehicle.getMonitorEnabled()))
-                    .collect(Collectors.toMap(Vehicle::getId, Function.identity()));
+                    .map(Vehicle::getId).toList();
             if (!monitored.isEmpty()) {
-                var candidates = telemetry.findOfflineCandidates(monitored.keySet().stream().toList(),
+                var candidates = telemetry.findOfflineCandidates(monitored,
                         now - VehicleTelemetryService.MAX_SPEED_AGE_MS);
                 for (var position : candidates) {
-                    notifier.notifyIfStillOffline(monitored.get(position.vehicleId()), position.driverId(), now);
+                    notifier.notifyIfStillOffline(position.vehicleId(), position.driverId(), position.taskId(), now);
                 }
             }
             if ((long) page * PAGE_SIZE >= batch.getTotal()) {
