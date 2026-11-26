@@ -42,7 +42,8 @@ public class DashboardService {
         }
         LocalDate today = LocalDate.now(BUSINESS_ZONE);
         var scope = daily(today, fleetId, null, null);
-        return new Overview(today, fleetId, mapper.fleetSize(fleetId), recognitions(scope), mapper.alertCounts(scope));
+        return new Overview(today, fleetId, mapper.fleetSize(fleetId), recognitions(scope), mapper.alertCounts(scope),
+                mapper.recentOverviewAlerts(scope));
     }
 
     public FleetRange range(Long fleetId, LocalDateTime start, LocalDateTime end) {

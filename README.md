@@ -27,6 +27,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    - `src/main/resources/db/migrations/20261123_violation_dispatch.sql`
    - `src/main/resources/db/migrations/20261126_vehicle_live_monitoring.sql`
    - `src/main/resources/db/migrations/20261126_alert_appeal_workflow.sql`
+   - `src/main/resources/db/migrations/20261126_dashboard_report_notifications.sql`
 3. 在 `src/main/resources/application.yml` 中配置 `spring.datasource` 的地址、用户名和密码。启动前必须完成建库、建表，因为应用初始化时会查询摄像头表。
 4. 在项目根目录执行：
 

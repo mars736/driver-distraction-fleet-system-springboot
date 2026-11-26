@@ -11,6 +11,7 @@ import entity.ReportJob;
 import entity.ReportJob.Status;
 import lombok.RequiredArgsConstructor;
 import mapper.ReportJobMapper;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,11 +22,15 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
 public class ReportJobService {
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
+
+    private static final Pattern REQUEST_KEY = Pattern.compile("[A-Za-z0-9._:-]{1,128}");
 
     private final ReportJobMapper jobs;
     private final ReportDataService data;
@@ -33,18 +38,29 @@ public class ReportJobService {
     private final OperationLogService audit;
     private final ObjectMapper json;
 
-    @Transactional
-    public JobView create(ReportRequest request) {
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public JobView create(ReportRequest request, String requestKey) {
         long owner = owner();
+        if (requestKey != null && !REQUEST_KEY.matcher(requestKey).matches()) {
+            throw new BusinessException(400, "申请标识必须为 1—128 个字母、数字或 . _ : -");
+        }
         data.validate(request);
         var job = new ReportJob();
         job.setOwnerId(owner);
+        job.setRequestKey(requestKey);
         job.setReportType(request.type());
         job.setFormat(request.format());
         job.setFiltersJson(write(request));
         job.setStatus(Status.PENDING);
         job.setCreatedAt(now());
-        jobs.insert(job);
+        try {
+            jobs.insert(job);
+        } catch (DuplicateKeyException duplicate) {
+            var original = requestKey == null ? null : jobs.findByRequestKey(owner, requestKey);
+            if (original == null) { throw duplicate; }
+            if (!read(original).equals(request)) { throw new RequestConflict(); }
+            return view(original);
+        }
         audit.success(OperationAction.REPORT_CREATE, job.getId(), request.fleetId(), request.type() + "_" + request.format());
         return view(job);
     }
@@ -88,7 +104,7 @@ public class ReportJobService {
     private JobView view(ReportJob job) {
         return new JobView(job.getId(), job.getReportType(), job.getFormat(), effectiveStatus(job), read(job),
                 job.getCreatedAt(), job.getStartedAt(), job.getFinishedAt(), job.getExpiresAt(),
-                job.getRowCount(), job.getErrorMessage());
+                job.getRowCount(), job.getErrorMessage(), job.getDataAsOf());
     }
 
     private Status effectiveStatus(ReportJob job) {
@@ -114,11 +130,15 @@ public class ReportJobService {
         catch (JsonProcessingException ex) { throw new IllegalStateException("读取报表筛选条件失败", ex); }
     }
 
-    static LocalDateTime now() { return LocalDateTime.now(BUSINESS_ZONE); }
+    static LocalDateTime now() { return LocalDateTime.now(BUSINESS_ZONE).truncatedTo(ChronoUnit.MILLIS); }
 
     public record JobView(long id, ReportType type, ReportFormat format, Status status, ReportRequest filters,
                           LocalDateTime createdAt, LocalDateTime startedAt, LocalDateTime finishedAt,
-                          LocalDateTime expiresAt, Integer rowCount, String errorMessage) { }
+                          LocalDateTime expiresAt, Integer rowCount, String errorMessage, LocalDateTime dataAsOf) { }
+
+    public static final class RequestConflict extends BusinessException {
+        private RequestConflict() { super(409, "申请标识已用于不同的报表条件"); }
+    }
 
     public record Download(Path file, ReportFormat format, String name) { }
 }

@@ -74,7 +74,11 @@ class DashboardIntegrationTest {
         frame(fleetB, vehicleB, driverB, day, "c0", false);
         alert(behavior, fleetA, vehicleA, driverA, day.plusSeconds(1), "SMS_ALERT", "OPEN");
         alert(revoked, fleetA, vehicleA, driverA, day.plusSeconds(2), "BACKLOG", "REVOKED");
-        alert(anomaly, fleetA, vehicleA, driverA, day.plusSeconds(3), "SPEED_UNKNOWN", "OPEN");
+        long lastAlert = alert(anomaly, fleetA, vehicleA, driverA, day.plusSeconds(3), "SPEED_UNKNOWN", "OPEN");
+        var tomorrow = day.plusDays(1);
+        alert(frame(fleetA, vehicleA, driverA, tomorrow, "c1", false), fleetA, vehicleA, driverA, tomorrow, "SMS_ALERT", "OPEN");
+        long otherFrame = frame(fleetB, vehicleB, driverB, day.plusSeconds(4), "c1", false);
+        long otherAlert = alert(otherFrame, fleetB, vehicleB, driverB, day.plusSeconds(4), "SMS_ALERT", "CONFIRMED");
 
         mvc.perform(get(ROOT + "/overview").param("fleetId", String.valueOf(fleetA)).header("Authorization", admin))
                 .andExpect(status().isOk())
@@ -90,11 +94,15 @@ class DashboardIntegrationTest {
                 .andExpect(jsonPath("$.data.recognitions.behaviors[0].share").value(0.5))
                 .andExpect(jsonPath("$.data.alerts.activeViolationCount").value(1))
                 .andExpect(jsonPath("$.data.alerts.speedUnknownCount").value(1))
-                .andExpect(jsonPath("$.data.alerts.revokedViolationCount").value(1));
+                .andExpect(jsonPath("$.data.alerts.revokedViolationCount").value(1))
+                .andExpect(jsonPath("$.data.recentAlerts.length()").value(3))
+                .andExpect(jsonPath("$.data.recentAlerts[0].id").value(lastAlert));
 
         mvc.perform(get(ROOT + "/overview").header("Authorization", admin))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.recognitions.totalFrames").value(6));
+                .andExpect(jsonPath("$.data.recognitions.totalFrames").value(7))
+                .andExpect(jsonPath("$.data.recentAlerts.length()").value(4))
+                .andExpect(jsonPath("$.data.recentAlerts[0].id").value(otherAlert));
     }
 
     @Test

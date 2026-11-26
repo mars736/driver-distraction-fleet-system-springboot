@@ -85,13 +85,15 @@ public class ReportWorker {
     private void generate(ReportJob job, String token) {
         boolean completed = false;
         try {
-            ReportTable table = loadAsOwner(job);
+            var snapshot = loadAsOwner(job);
+            var table = snapshot.table();
             try (var output = Files.newOutputStream(files.partial(token, job.getFormat()), StandardOpenOption.CREATE_NEW)) {
-                renderer.render(job.getFormat(), table, output);
+                renderer.render(job.getFormat(), table, snapshot.dataAsOf(), output);
             }
             files.publish(token, job.getFormat());
             var now = ReportJobService.now();
-            completed = jobs.complete(job.getId(), token, now, now.plusDays(7), table.rows().size()) == 1;
+            completed = jobs.complete(job.getId(), token, now, now.plusDays(7),
+                    table.rows().size(), snapshot.dataAsOf()) == 1;
         } catch (BusinessException ex) {
             jobs.fail(job.getId(), token, ReportJobService.now(), ex.getMessage());
         } catch (Exception ex) {
@@ -103,7 +105,7 @@ public class ReportWorker {
         }
     }
 
-    private ReportTable loadAsOwner(ReportJob job) {
+    private ReportDataService.Snapshot loadAsOwner(ReportJob job) {
         var user = users.selectById(job.getOwnerId());
         if (user == null || !Boolean.TRUE.equals(user.getEnabled())
                 || !CommonConstant.ROLE_PLATFORM_ADMIN.equals(user.getRole())) {

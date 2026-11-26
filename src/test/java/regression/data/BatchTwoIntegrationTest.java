@@ -28,6 +28,9 @@ import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.closeTo;
@@ -76,6 +79,7 @@ class BatchTwoIntegrationTest {
         jdbc.update("DELETE FROM report_job WHERE owner_id IN (?,?)", admin, otherAdmin);
         jdbc.update("DELETE FROM operation_log WHERE actor_id IN (?,?) OR fleet_id=?", admin, otherAdmin, fleet);
         jdbc.update("DELETE FROM alert_appeal WHERE fleet_id=?", fleet);
+        jdbc.update("DELETE FROM alert_review_record WHERE alert_id IN (SELECT id FROM alert_record WHERE fleet_id=?)", fleet);
         jdbc.update("DELETE FROM alert_record WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM recognition_record WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM vehicle_telemetry WHERE vehicle_id=?", vehicle);
@@ -119,6 +123,100 @@ class BatchTwoIntegrationTest {
     }
 
     @Test
+    void sameReportRequestIsReusedAfterLostResponseAndConcurrentSubmissions() throws Exception {
+        var payload = """
+                {"type":"RECOGNITION","format":"XLSX","fleetId":%d}
+                """.formatted(fleet);
+        var key = UUID.randomUUID().toString();
+        var start = new CountDownLatch(1);
+        long original;
+        try (var pool = Executors.newFixedThreadPool(3)) {
+            var jobs = java.util.stream.IntStream.range(0, 3).mapToObj(index -> pool.submit(() -> {
+                start.await();
+                return submitReport(payload, key, admin);
+            })).toList();
+            start.countDown();
+            original = jobs.getFirst().get(10, TimeUnit.SECONDS);
+            for (var job : jobs) {
+                assertThat(job.get(10, TimeUnit.SECONDS)).isEqualTo(original);
+            }
+        }
+        assertThat(submitReport(payload, key, admin)).isEqualTo(original);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM report_job WHERE owner_id=?", Integer.class, admin))
+                .isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM operation_log WHERE actor_id=? AND action='REPORT_CREATE'",
+                Integer.class, admin)).isEqualTo(1);
+        mvc.perform(post("/api/report-jobs").header("Authorization", token(admin)).header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(payload.replace("XLSX", "PDF")))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.data.reason").value("IDEMPOTENCY_KEY_REUSED"));
+        assertThat(submitReport(payload, key, otherAdmin)).isNotEqualTo(original);
+        mvc.perform(get("/api/report-jobs/{id}/file", original).header("Authorization", token(otherAdmin)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void reportUsesWorkerSnapshotAndKeepsArchivedScoreAfterLaterRevocation() throws Exception {
+        var month = YearMonth.now(ZoneId.of("Asia/Shanghai")).minusMonths(1);
+        var occurredAt = month.atDay(10).atTime(10, 0);
+        long firstRecognition = recognition(null);
+        long secondRecognition = recognition(null);
+        alert(firstRecognition, null);
+        alert(secondRecognition, null);
+        jdbc.update("UPDATE alert_record SET captured_at=?, behavior_code='c1' WHERE fleet_id=?", occurredAt, fleet);
+        jdbc.update("UPDATE recognition_record SET captured_at=? WHERE fleet_id=?", occurredAt, fleet);
+
+        var payload = """
+                {"type":"DRIVER_SCORE","format":"XLSX","fleetId":%d,"driverId":%d,"month":"%s"}
+                """.formatted(fleet, driver, month);
+        long firstJob = createReport(payload);
+        revokeAlert(firstRecognition);
+        worker.runOnce();
+        var response = mvc.perform(get("/api/report-jobs/{id}", firstJob).header("Authorization", token(admin)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("COMPLETED"))
+                .andReturn().getResponse();
+        var detail = json.readTree(response.getContentAsByteArray()).path("data");
+        var dataAsOf = LocalDateTime.parse(detail.path("dataAsOf").asText());
+        assertThat(dataAsOf).isAfterOrEqualTo(LocalDateTime.parse(detail.path("startedAt").asText()))
+                .isBeforeOrEqualTo(LocalDateTime.parse(detail.path("finishedAt").asText()));
+
+        var media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        byte[] firstFile = download(firstJob, media);
+        try (var workbook = new XSSFWorkbook(new ByteArrayInputStream(firstFile))) {
+            var row = workbook.getSheetAt(0).getRow(1);
+            assertThat(row.getCell(8).getNumericCellValue()).isEqualTo(1);
+            assertThat(row.getCell(10).getNumericCellValue()).isEqualTo(1);
+            assertThat(workbook.getSheet("取数信息").getRow(0).getCell(1).getLocalDateTimeCellValue())
+                    .isEqualTo(dataAsOf);
+        }
+
+        revokeAlert(secondRecognition);
+        assertThat(download(firstJob, media)).containsExactly(firstFile);
+        long secondJob = createReport(payload);
+        worker.runOnce();
+        try (var workbook = new XSSFWorkbook(new ByteArrayInputStream(download(secondJob, media)))) {
+            var row = workbook.getSheetAt(0).getRow(1);
+            assertThat(row.getCell(8).getNumericCellValue()).isZero();
+            assertThat(row.getCell(10).getNumericCellValue()).isEqualTo(2);
+        }
+    }
+
+    private long submitReport(String data, String key, long owner) throws Exception {
+        var response = mvc.perform(post("/api/report-jobs").header("Authorization", token(owner))
+                        .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(data))
+                .andExpect(status().isAccepted()).andReturn().getResponse();
+        return json.readTree(response.getContentAsByteArray()).path("data").path("id").asLong();
+    }
+
+    private void revokeAlert(long recognition) throws Exception {
+        long id = jdbc.queryForObject("SELECT id FROM alert_record WHERE recognition_id=?", Long.class, recognition);
+        mvc.perform(post("/api/alerts/{id}/reviews", id).header("Authorization", token(admin))
+                        .contentType(MediaType.APPLICATION_JSON).content("""
+                                {"status":"REVOKED","reason":"报表取数口径测试"}
+                                """))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void reportsRecoverAndReuseRecognitionScoreAndDashboardData() throws Exception {
         recognition(null);
         String month = YearMonth.now(ZoneId.of("Asia/Shanghai")).toString();
@@ -154,7 +252,7 @@ class BatchTwoIntegrationTest {
         try {
             assertThat(reader.getNumberOfPages()).isEqualTo(1);
             var text = new PdfTextExtractor(reader).getTextFromPage(1).replaceAll("\\s+", "");
-            assertThat(text).contains("识别记录报表", "无匹配记录");
+            assertThat(text).contains("识别记录报表", "无匹配记录", "取数时间（北京时间）");
         } finally { reader.close(); }
 
         for (int i = 0; i < 120; i++) { recognition(null); }
