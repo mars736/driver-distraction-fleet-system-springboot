@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import service.vehicle.VehicleService;
+import service.camera.CameraDriverBinding;
 
 /**
  * 车辆档案 REST 接口。
@@ -35,6 +36,11 @@ public class VehicleController {
             return ResponseEntity.status(exception.getCode())
                     .body(Result.error(exception.getCode(), exception.getMessage()));
         }
+    }
+
+    @GetMapping("/{id}/current-driver")
+    public Result<CameraDriverBinding.Binding> currentDriver(@PathVariable long id) {
+        return Result.success(vehicleService.currentDriver(id));
     }
 
     @PostMapping

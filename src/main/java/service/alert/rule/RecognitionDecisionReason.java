@@ -3,6 +3,7 @@ package service.alert.rule;
 /** 识别判定的持久化代码。枚举名称也是识别接口返回的代码。 */
 public enum RecognitionDecisionReason {
     MISSING_VEHICLE("未关联车辆"),
+    DRIVER_UNRESOLVED("司机归属待核验"),
     VEHICLE_NOT_FOUND("关联车辆不存在"),
     OUT_OF_ORDER("采集时间乱序"),
     LOW_SPEED("低速静默"),

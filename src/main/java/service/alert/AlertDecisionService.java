@@ -6,6 +6,7 @@ import entity.RecognitionRecord;
 import entity.Vehicle;
 import lombok.RequiredArgsConstructor;
 import mapper.AlertDecisionMapper;
+import mapper.CameraMapper;
 import mapper.SmsDeliveryMapper;
 import mapper.VehicleMapper;
 import org.springframework.context.ApplicationEventPublisher;
@@ -17,6 +18,7 @@ import service.alert.rule.RecognitionDecisionReason;
 import service.alert.rule.VehicleAlertState;
 import service.alert.live.AlertCreatedEvent;
 import service.alert.sms.SmsChannelProperties;
+import video.FfmpegManager;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -38,10 +40,18 @@ public class AlertDecisionService {
     private final ApplicationEventPublisher events;
     private final SmsDeliveryMapper smsDeliveries;
     private final SmsChannelProperties smsProperties;
+    private final CameraMapper cameras;
+    private final FfmpegManager ffmpeg;
 
     /** 锁定车辆状态，识别记录、告警和计数一起提交；重试不会重复累计。 */
     @Transactional(rollbackFor = Exception.class)
     public List<AlertRecord> process(CapturedInference input, boolean continuityBroken) throws IOException {
+        boolean managed = FfmpegManager.isManagedStream(input.streamId());
+        if (managed && (input.cameraId() == null || input.vehicleId() == null
+                || cameras.lockMonitoredCamera(input.cameraId(), input.vehicleId()) == null
+                || !ffmpeg.isCurrentStream(input.cameraId(), input.streamId()))) {
+            return List.of();
+        }
         timelineCapture.lockUntilCompletion(input);
         Vehicle vehicle = input.vehicleId() == null ? null : vehicleMapper.selectById(input.vehicleId());
         VehicleAlertState state = new VehicleAlertState();
@@ -57,6 +67,21 @@ public class AlertDecisionService {
         Double speed = vehicle == null ? null : speedProvider.speedKmh(vehicle.getId(), input.driverId(), input.capturedAt());
         boolean validNumbers = Double.isFinite(input.maxP()) && input.maxP() >= 0 && input.maxP() <= 1
                 && Double.isFinite(input.energy()) && Double.isFinite(input.knnDist()) && input.knnDist() >= 0;
+        if (managed && !Objects.equals(state.getDriverId(), input.driverId())) {
+            state.resetContinuity();
+            state.setOtherEvents(0);
+            state.setOtherAlerted(false);
+            state.setSpeedUnknown(false);
+        }
+        if (managed && input.driverId() == null) {
+            var unresolved = new AlertRuleEngine.Evaluation(state, false, RecognitionDecisionReason.DRIVER_UNRESOLVED, List.of());
+            mapper.insertRecognition(recognition(input, vehicle, unresolved, null, validNumbers, null));
+            state.setDriverId(null);
+            if (vehicle != null) {
+                mapper.updateState(vehicle.getId(), objectMapper.writeValueAsString(state));
+            }
+            return List.of();
+        }
         AlertRuleEngine.Evaluation evaluation = engine.evaluate(state, new AlertRuleEngine.Observation(
                 vehicle == null ? null : vehicle.getId(), input.driverId(), input.capturedAt(),
                 validNumbers ? input.pred() : -1, input.ood(), speed, broken));

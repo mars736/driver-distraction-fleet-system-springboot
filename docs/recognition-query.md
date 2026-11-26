@@ -54,7 +54,8 @@ Authorization: Bearer <token>
 | `OOD` | 分布外样本 |
 | `INVALID_PREDICTION` | 无效预测结果 |
 | `OUT_OF_ORDER` | 采集时间乱序 |
-| `MISSING_VEHICLE` | 未关联车辆 |
+| MISSING_VEHICLE | 未关联车辆 |
+| DRIVER_UNRESOLVED | 司机归属待核验 |
 | `VEHICLE_NOT_FOUND` | 关联车辆不存在 |
 
 旧记录中的未知代码会原样返回，中文标签为「未知判定原因」。`latestAppeals[].decisionReason` 继续返回人工处理理由。

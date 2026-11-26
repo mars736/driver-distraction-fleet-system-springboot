@@ -15,8 +15,11 @@ import mapper.CameraMapper;
 import mapper.FleetMapper;
 import mapper.UserMapper;
 import mapper.VehicleMapper;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import service.camera.CameraCaptureCoordinator.VehicleChanged;
+import service.camera.CameraDriverBinding;
 
 import java.util.List;
 
@@ -33,6 +36,8 @@ public class VehicleService {
     private final UserMapper userMapper;
     private final CameraMapper cameraMapper;
     private final OperationLogService audit;
+    private final ApplicationEventPublisher events;
+    private final CameraDriverBinding cameraBindings;
 
     public PageResult<Vehicle> list(Long fleetId, Integer page, Integer pageSize) {
         int currentPage = (page == null || page < 1) ? 1 : page;
@@ -50,6 +55,11 @@ public class VehicleService {
             throw new BusinessException(404, "车辆不存在");
         }
         return vehicle;
+    }
+
+    public CameraDriverBinding.Binding currentDriver(long id) {
+        getById(id);
+        return cameraBindings.current(id);
     }
 
     public Vehicle getReadableById(long id) {
@@ -100,6 +110,7 @@ public class VehicleService {
         validateMonitor(vehicle.getMonitorEnabled());
         vehicleMapper.update(vehicle);
         audit.success(OperationAction.VEHICLE_UPDATE, vehicle.getId(), vehicle.getFleetId());
+        events.publishEvent(new VehicleChanged(vehicle.getId(), false));
         return vehicle;
     }
 
@@ -110,6 +121,7 @@ public class VehicleService {
         vehicleMapper.updateMonitorEnabled(id, monitorEnabled);
         audit.success(OperationAction.VEHICLE_MONITOR, id, vehicle.getFleetId(),
                 Integer.valueOf(1).equals(monitorEnabled) ? "ENABLED" : "DISABLED");
+        events.publishEvent(new VehicleChanged(id, monitorEnabled == 0));
     }
 
     @Transactional
@@ -122,6 +134,7 @@ public class VehicleService {
             throw new BusinessException("该车还关联着摄像头，请先处理");
         }
         vehicleMapper.deleteById(id);
+        events.publishEvent(new VehicleChanged(id, true));
         audit.success(OperationAction.VEHICLE_DELETE, id, vehicle.getFleetId());
         log.info("删除车辆 id={}", id);
     }

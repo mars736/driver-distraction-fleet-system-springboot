@@ -1,6 +1,7 @@
 package controller.alert;
 
 import common.exception.BusinessException;
+import controller.camera.CameraController;
 import controller.score.DriverScoreController;
 import controller.telemetry.VehicleTelemetryController;
 import controller.telemetry.VehicleLiveStatusController;
@@ -29,7 +30,7 @@ import java.io.IOException;
         AppealController.class, AlertLiveController.class, AlertReportController.class,
         DriverScoreController.class, VehicleTelemetryController.class, VehicleLiveStatusController.class,
         OperationLogController.class, WorkforceController.class, FleetCareController.class,
-        OperationsReminderController.class, ViolationDispatchController.class})
+        OperationsReminderController.class, ViolationDispatchController.class, CameraController.class})
 @Slf4j
 public class AlertApiExceptionHandler {
     @ExceptionHandler(BusinessException.class)

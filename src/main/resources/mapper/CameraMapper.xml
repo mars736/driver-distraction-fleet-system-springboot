@@ -3,8 +3,32 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="mapper.CameraMapper">
 
-    <select id="listEnabled" resultType="entity.Camera">
-        SELECT * FROM camera WHERE enabled = 1
+    <select id="listEnabledIds" resultType="long">
+        SELECT id FROM camera WHERE enabled = 1
+    </select>
+
+    <select id="listIdsByVehicle" resultType="long">
+        SELECT id FROM camera WHERE vehicle_id = #{vehicleId}
+    </select>
+
+    <select id="selectRunnable" resultType="entity.Camera" useCache="false" flushCache="true">
+        SELECT c.* FROM camera c JOIN vehicle v ON v.id = c.vehicle_id
+        WHERE c.id = #{id} AND c.enabled = 1 AND v.monitor_enabled = 1
+    </select>
+
+    <select id="lockById" resultType="entity.Camera">
+        SELECT * FROM camera WHERE id = #{id} FOR UPDATE
+    </select>
+
+    <select id="lockMonitoredCamera" resultType="long">
+        SELECT c.id FROM camera c JOIN vehicle v ON v.id = c.vehicle_id
+        WHERE c.id = #{id} AND v.id = #{vehicleId} AND c.enabled = 1 AND v.monitor_enabled = 1
+        FOR SHARE
+    </select>
+
+    <select id="hasHistory" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM recognition_record WHERE camera_id = #{id})
+            OR EXISTS(SELECT 1 FROM alert_record WHERE camera_id = #{id})
     </select>
 
     <select id="listAll" resultType="entity.Camera">
@@ -29,8 +53,7 @@
         SET vehicle_id = #{vehicleId},
             driver_id = #{driverId},
             stream_url = #{streamUrl},
-            sample_interval_seconds = #{sampleIntervalSeconds},
-            enabled = #{enabled}
+            sample_interval_seconds = #{sampleIntervalSeconds}
         WHERE id = #{id}
     </update>
 

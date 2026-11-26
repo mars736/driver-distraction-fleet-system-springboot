@@ -12,7 +12,12 @@ import java.util.List;
 @Mapper
 public interface CameraMapper {
 
-    List<Camera> listEnabled();
+    List<Long> listEnabledIds();
+    List<Long> listIdsByVehicle(long vehicleId);
+    Camera selectRunnable(long id);
+    Camera lockById(long id);
+    Long lockMonitoredCamera(@Param("id") long id, @Param("vehicleId") long vehicleId);
+    boolean hasHistory(long id);
 
     List<Camera> listAll();
 

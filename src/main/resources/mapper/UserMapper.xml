@@ -60,6 +60,12 @@
         LIMIT #{offset}, #{pageSize}
     </select>
 
+    <select id="findActiveDriversByVehicle" resultType="long">
+        SELECT u.id FROM sys_user u JOIN vehicle v ON v.id = u.vehicle_id AND v.fleet_id = u.fleet_id
+        WHERE v.id = #{vehicleId} AND u.role = 'DRIVER' AND u.enabled = 1
+        ORDER BY u.id LIMIT 2
+    </select>
+
     <select id="countDrivers" resultType="long">
         SELECT COUNT(*) FROM sys_user
         <where>
