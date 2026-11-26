@@ -8,6 +8,7 @@ public final class WorkforceConflict extends BusinessException {
     public enum Reason {
         TASK_NOT_PENDING("任务已出发或结束，当前操作仅适用于待执行任务"),
         TASK_OVERLAPS_REST("运输任务与休息日重叠"),
+        SHIFT_VERSION_CONFLICT("排班已变更，请刷新后再保存"),
         HISTORICAL_SHIFT_READ_ONLY("历史排班只读"),
         SHIFT_OVERLAPS_SHIFT("班次与相邻日期的排班重叠"),
         REST_OVERLAPS_TASK("休息日与未完成的运输任务重叠"),

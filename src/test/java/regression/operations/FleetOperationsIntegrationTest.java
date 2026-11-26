@@ -81,6 +81,7 @@ class FleetOperationsIntegrationTest {
             jdbc.update("DELETE FROM " + table + " WHERE vehicle_id IN (SELECT id FROM vehicle WHERE fleet_id=?)", fleet);
         }
         jdbc.update("DELETE FROM driver_attendance WHERE shift_id IN (SELECT id FROM driver_shift WHERE fleet_id=?)", fleet);
+        jdbc.update("DELETE FROM driver_shift_change WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM driver_shift WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM driver_leave WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM transport_task WHERE fleet_id=?", fleet);
@@ -340,11 +341,46 @@ class FleetOperationsIntegrationTest {
         call(HttpMethod.PUT, WORK + "/shifts", admin, workShift(first.atTime(20, 0), second.atTime(4, 0)), 200);
         assertThat(call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(second), 409)
                 .path("reason").asText()).isEqualTo("SHIFT_OVERLAPS_SHIFT");
-        call(HttpMethod.PUT, WORK + "/shifts", admin, workShift(first.atTime(16, 0), second.atStartOfDay()), 200);
+        call(HttpMethod.PUT, WORK + "/shifts", admin, versionedShift(first.atTime(16, 0), second.atStartOfDay(), 1), 200);
         call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(second), 200);
         assertThat(call(HttpMethod.PUT, WORK + "/shifts", admin,
-                workShift(first.atTime(20, 0), second.atTime(4, 0)), 409)
+                versionedShift(first.atTime(20, 0), second.atTime(4, 0), 2), 409)
                 .path("reason").asText()).isEqualTo("SHIFT_OVERLAPS_SHIFT");
+    }
+
+    @Test
+    void concurrentShiftEditsRejectStaleVersionAndRecordOnlySuccessfulChanges() throws Exception {
+        var day = today.plusDays(1);
+        var created = call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(day), 200);
+        long shiftId = id(created);
+        assertThat(created.path("version").asLong()).isEqualTo(1);
+        assertThat(call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(day), 409)
+                .path("reason").asText()).isEqualTo("SHIFT_VERSION_CONFLICT");
+
+        long secondAdmin = user("n", "PLATFORM_ADMIN", null);
+        var update = versionedShift(day.atTime(16, 0), day.plusDays(1).atStartOfDay(), 1);
+        race(() -> rawStatus(HttpMethod.PUT, WORK + "/shifts", admin, update),
+                () -> rawStatus(HttpMethod.PUT, WORK + "/shifts", secondAdmin, update));
+        assertThat(call(HttpMethod.PUT, WORK + "/shifts", admin, update, 409)
+                .path("reason").asText()).isEqualTo("SHIFT_VERSION_CONFLICT");
+
+        var scheduled = call(HttpMethod.GET, WORK + "/shifts?driverId=" + driver + "&start=" + day
+                + "&end=" + day.plusDays(1), admin, null, 200);
+        assertThat(scheduled.get(0).path("shift").path("version").asLong()).isEqualTo(2);
+
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM driver_shift_change WHERE shift_id=?",
+                Integer.class, shiftId)).isEqualTo(2);
+        var changed = jdbc.queryForMap("""
+                SELECT actor_id, reason, previous_version, previous_type, previous_starts_at,
+                       new_version, new_type, new_starts_at, new_ends_at
+                FROM driver_shift_change WHERE shift_id=? AND new_version=2
+                """, shiftId);
+        assertThat(((Number) changed.get("actor_id")).longValue()).isIn(admin, secondAdmin);
+        assertThat(changed).containsEntry("reason", "班次调整").containsEntry("previous_type", "REST")
+                .containsEntry("previous_version", 1L).containsEntry("new_type", "LATE")
+                .containsEntry("previous_starts_at", null);
+        assertThat(changed.get("new_starts_at")).isNotNull();
+        assertThat(changed.get("new_ends_at")).isNotNull();
     }
 
     @Test
@@ -400,6 +436,11 @@ class FleetOperationsIntegrationTest {
     private Map<String, Object> workShift(LocalDateTime starts, LocalDateTime ends) {
         return Map.of("driverId", driver, "date", starts.toLocalDate(), "type", "LATE",
                 "startsAt", starts, "endsAt", ends);
+    }
+
+    private Map<String, Object> versionedShift(LocalDateTime starts, LocalDateTime ends, long version) {
+        return Map.of("driverId", driver, "date", starts.toLocalDate(), "type", "LATE",
+                "startsAt", starts, "endsAt", ends, "version", version, "reason", "班次调整");
     }
 
     private Map<String, Object> restRequest(LocalDate date) {

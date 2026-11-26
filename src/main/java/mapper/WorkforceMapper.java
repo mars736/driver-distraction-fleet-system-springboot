@@ -26,6 +26,9 @@ public interface WorkforceMapper {
             @Param("start") LocalDateTime start,
             @Param("end") LocalDateTime end);
 
+    void recordShiftChange(@Param("before") Shift before, @Param("after") Shift after,
+            @Param("actorId") long actorId, @Param("reason") String reason, @Param("changedAt") LocalDateTime changedAt);
+
     Attendance attendance(@Param("shiftId") long shiftId);
 
     List<Attendance> attendanceRange(@Param("driverId") long driverId, @Param("start") LocalDate start, @Param("end") LocalDate end);
