@@ -349,6 +349,45 @@ class FleetOperationsIntegrationTest {
     }
 
     @Test
+    void weeklySchedulePagesDriversAndIncludesOnlyRequestedShiftsAndPunchTimes() throws Exception {
+        var start = today.plusDays(1);
+        var end = start.plusDays(7);
+        var shift = call(HttpMethod.PUT, WORK + "/shifts", admin,
+                workShift(start.atTime(8, 0), start.atTime(16, 0)), 200);
+        call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(end), 200);
+        jdbc.update("""
+                INSERT INTO driver_attendance(shift_id,clock_in_at,clock_in_lat,clock_in_lon,
+                                              clock_out_at,clock_out_lat,clock_out_lon)
+                VALUES(?,?,24.48,118.08,?,24.48,118.08)
+                """, id(shift), start.atTime(8, 0), start.atTime(16, 0));
+
+        String path = WORK + "/shifts/page?fleetId=" + fleet + "&start=" + start + "&end=" + end;
+        var first = call(HttpMethod.GET, path + "&pageSize=1", admin, null, 200);
+        assertThat(first.path("total").asLong()).isEqualTo(2);
+        var firstDriver = first.path("list").get(0);
+        assertThat(firstDriver.path("driverId").asLong()).isEqualTo(otherDriver);
+        assertThat(firstDriver.path("shifts")).isEmpty();
+
+        var second = call(HttpMethod.GET, path + "&page=2&pageSize=1", admin, null, 200);
+        var scheduled = second.path("list").get(0).path("shifts");
+        assertThat(scheduled).hasSize(1);
+        assertThat(scheduled.get(0).path("shiftId").asLong()).isEqualTo(id(shift));
+        assertThat(scheduled.get(0).path("version").asLong()).isEqualTo(1);
+        assertThat(LocalDateTime.parse(scheduled.get(0).path("clockInAt").asText())).isEqualTo(start.atTime(8, 0));
+        assertThat(LocalDateTime.parse(scheduled.get(0).path("clockOutAt").asText())).isEqualTo(start.atTime(16, 0));
+        assertThat(scheduled.get(0).has("clockInLat")).isFalse();
+
+        assertThat(call(HttpMethod.GET, path + "&page=3&pageSize=1", admin, null, 200).path("list")).isEmpty();
+        var filtered = call(HttpMethod.GET, path + "&driverId=" + otherDriver, admin, null, 200);
+        assertThat(filtered.path("total").asLong()).isEqualTo(1);
+        assertThat(filtered.path("list").get(0).path("shifts")).isEmpty();
+        call(HttpMethod.GET, path + "&driverId=" + Long.MAX_VALUE, admin, null, 404);
+        call(HttpMethod.GET, path, driver, null, 403);
+        call(HttpMethod.GET, WORK + "/shifts/page?fleetId=" + fleet + "&start=" + start
+                + "&end=" + end.plusDays(1), admin, null, 400);
+    }
+
+    @Test
     void concurrentShiftEditsRejectStaleVersionAndRecordOnlySuccessfulChanges() throws Exception {
         var day = today.plusDays(1);
         var created = call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(day), 200);

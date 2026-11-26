@@ -93,3 +93,5 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 ### 司机排班保存
 
 `GET /api/operations/workforce/shifts` 的每条 `shift` 含 `version`。新建时可省略版本或传 `0`，成功后返回版本 `1`。更新时须提交已读取的版本，保存成功后版本递增。版本缺失或过期的更新返回 `409` 和 `SHIFT_VERSION_CONFLICT`，前端应重新加载后再编辑。可选 `reason` 最长 300 字，随操作者及变更前后的版本、班次类型和起止时间写入 `driver_shift_change`。
+
+`GET /api/operations/workforce/shifts/page` 供平台管理员按车队分页查看司机排班。传 `fleetId`、`start`（含）、`end`（不含），日期范围为 1 至 7 天。可选 `driverId`、`page`（默认 1）、`pageSize`（默认 20，最大 100）。分页按司机编号倒序，每名司机包含该时段的 `shifts`，无排班时为空数组。班次含版本和签到、签退时间。车队不存在，或指定司机不属于该车队时返回 `404`。

@@ -14,6 +14,9 @@ public interface WorkforceMapper {
 
     List<Shift> shifts(@Param("driverId") long driverId, @Param("start") LocalDate start, @Param("end") LocalDate end);
 
+    List<ScheduleEntry> scheduleEntries(@Param("driverIds") List<Long> driverIds,
+            @Param("start") LocalDate start, @Param("end") LocalDate end);
+
     boolean shiftOverlap(@Param("driverId") long driverId,
             @Param("date") LocalDate date,
             @Param("start") LocalDateTime start,

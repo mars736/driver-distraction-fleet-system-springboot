@@ -35,6 +35,11 @@ public final class Workforce {
     public record Attendance(long shiftId, LocalDateTime clockInAt, double clockInLat, double clockInLon,
                              LocalDateTime clockOutAt, Double clockOutLat, Double clockOutLon) { }
     public record ShiftAttendance(Shift shift, Attendance attendance) { }
+    public record ScheduleEntry(long shiftId, long driverId, LocalDate shiftDate, ShiftType shiftType,
+                                LocalDateTime startsAt, LocalDateTime endsAt, long version,
+                                LocalDateTime clockInAt, LocalDateTime clockOutAt) { }
+    public record DriverSchedule(long driverId, String name, String employeeNo, boolean enabled,
+                                 List<ScheduleEntry> shifts) { }
     public record Leave(long id, long driverId, long fleetId, LeaveType leaveType, LocalDateTime startsAt,
                         LocalDateTime endsAt, String reason, LeaveStatus status, LocalDateTime createdAt,
                         Long decidedBy, LocalDateTime decidedAt, String decisionNote) { }
