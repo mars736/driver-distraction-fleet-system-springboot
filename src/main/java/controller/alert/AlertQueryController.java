@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 import service.alert.AlertQueryService;
 import vo.alert.AlertView;
 import vo.alert.AlertTimelineItem;
+import vo.alert.AlertFrameAvailability;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -44,6 +45,11 @@ public class AlertQueryController {
     @GetMapping("/{id}/key-frames")
     public Result<List<AlertTimelineItem>> timeline(@PathVariable long id) {
         return Result.success(service.timeline(id));
+    }
+
+    @GetMapping("/{id}/key-frames/availability")
+    public Result<List<AlertFrameAvailability>> timelineAvailability(@PathVariable long id) {
+        return Result.success(service.timelineAvailability(id));
     }
 
     @GetMapping("/{id}/key-frames/{offset}")

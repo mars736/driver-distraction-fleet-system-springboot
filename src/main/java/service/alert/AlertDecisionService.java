@@ -77,6 +77,8 @@ public class AlertDecisionService {
             var unresolved = new AlertRuleEngine.Evaluation(state, false, RecognitionDecisionReason.DRIVER_UNRESOLVED, List.of());
             mapper.insertRecognition(recognition(input, vehicle, unresolved, null, validNumbers, null));
             state.setDriverId(null);
+            timelineCapture.capture(input, Instant.ofEpochMilli(input.capturedAt())
+                    .atZone(ZoneId.of("Asia/Shanghai")).toLocalDateTime(), List.of(), true);
             if (vehicle != null) {
                 mapper.updateState(vehicle.getId(), objectMapper.writeValueAsString(state));
             }

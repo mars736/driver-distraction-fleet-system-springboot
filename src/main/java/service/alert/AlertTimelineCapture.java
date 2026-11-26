@@ -99,6 +99,16 @@ public class AlertTimelineCapture {
         });
     }
 
+    boolean isAwaitingNext(long alertId, Long cameraId) {
+        if (cameraId == null) { return false; }
+        synchronized (recent) {
+            Sample latest = recent.get(cameraId);
+            return latest != null && latest.driverId() != null && latest.vehicleId() != null
+                    && latest.alerts().contains(alertId)
+                    && System.currentTimeMillis() - latest.capturedAt() <= MAX_GAP_MS;
+        }
+    }
+
     private void save(long alertId, int offset, Sample sample) {
         if (sample.jpeg() == null) { return; }
         String path;

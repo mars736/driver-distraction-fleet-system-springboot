@@ -72,16 +72,30 @@ public class AppealMaterialStore {
         var material = new AppealMaterial();
         material.setOriginalName(name); material.setContentType(contentType);
         material.setSizeBytes((long) bytes.length); material.setRelativePath(relative);
+        material.setAvailability(AppealMaterial.Availability.AVAILABLE);
         return material;
     }
 
+    public AppealMaterial.Availability availability(AppealMaterial material) {
+        try {
+            read(material);
+            return AppealMaterial.Availability.AVAILABLE;
+        } catch (BusinessException missing) {
+            return AppealMaterial.Availability.UNAVAILABLE;
+        }
+    }
+
     public Path read(AppealMaterial material) {
+        if (material.getRelativePath() == null || material.getRelativePath().isBlank()) {
+            throw new BusinessException(404, "材料不存在");
+        }
         try {
             Path candidate = root.resolve(material.getRelativePath()).normalize();
             if (!candidate.startsWith(root.resolve("appeals"))) { throw new BusinessException(404, "材料不存在"); }
             // normalize 防 ../，toRealPath 再检查符号链接的实际去向，二者都要校验。
             Path actual = candidate.toRealPath();
-            if (!actual.startsWith(root.toRealPath()) || !Files.isRegularFile(actual) || !Files.isReadable(actual)) {
+            if (!actual.startsWith(root.toRealPath().resolve("appeals"))
+                    || !Files.isRegularFile(actual) || !Files.isReadable(actual)) {
                 throw new BusinessException(404, "材料不存在");
             }
             return actual;

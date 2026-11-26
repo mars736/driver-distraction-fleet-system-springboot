@@ -11,6 +11,7 @@ import controller.operations.OperationsReminderController;
 import controller.operations.WorkforceController;
 import controller.operations.ViolationDispatchController;
 import common.response.Result;
+import service.alert.AlertReviewConflict;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -33,6 +34,12 @@ import java.io.IOException;
         OperationsReminderController.class, ViolationDispatchController.class, CameraController.class})
 @Slf4j
 public class AlertApiExceptionHandler {
+    @ExceptionHandler(AlertReviewConflict.class)
+    public ResponseEntity<Result<AlertReviewConflict.Details>> reviewConflict(AlertReviewConflict exception) {
+        return ResponseEntity.status(exception.getCode()).contentType(MediaType.APPLICATION_JSON)
+                .body(new Result<>(exception.getCode(), exception.getMessage(), exception.getDetails()));
+    }
+
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<Result<Void>> businessError(BusinessException exception) {
         // 下载请求可能只接受 PDF/图片，但失败时仍要返回约定的 JSON，不能继续按文件格式协商。

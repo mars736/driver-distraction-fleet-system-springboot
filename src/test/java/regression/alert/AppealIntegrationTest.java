@@ -110,6 +110,10 @@ class AppealIntegrationTest {
         long id = create("ALERT", confirmedAlert, driverToken);
         decide(id, "REVOKED").andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("REVOKED"));
         assertThat(alertStatus(confirmedAlert)).isEqualTo("REVOKED");
+        mvc.perform(get("/api/appeals/" + id).header("Authorization", driverToken))
+                .andExpect(jsonPath("$.data.effectiveStatus").value("REVOKED"));
+        mvc.perform(get("/api/recognitions/" + rec).header("Authorization", driverToken))
+                .andExpect(jsonPath("$.data.effectiveStatus").value("REVOKED"));
         assertThat(jdbc.queryForMap("SELECT * FROM recognition_record WHERE id=?", rec)).isEqualTo(before);
         assertThat(jdbc.queryForObject("SELECT sms_status FROM alert_record WHERE id=?", String.class, confirmedAlert)).isEqualTo("SIMULATED");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM alert_review_record WHERE alert_id=? AND from_status='CONFIRMED' AND to_status='REVOKED'", Integer.class, confirmedAlert)).isEqualTo(1);
@@ -132,6 +136,10 @@ class AppealIntegrationTest {
         long id = create("RECOGNITION", ordinary, driverToken);
         decide(id, "REVOKED").andExpect(status().isOk());
         assertThat(jdbc.queryForMap("SELECT * FROM recognition_record WHERE id=?", ordinary)).isEqualTo(before);
+        mvc.perform(get("/api/appeals/" + id).header("Authorization", adminToken))
+                .andExpect(jsonPath("$.data.effectiveStatus").value("REVOKED"));
+        mvc.perform(get("/api/recognitions/" + ordinary).header("Authorization", driverToken))
+                .andExpect(jsonPath("$.data.effectiveStatus").value("REVOKED"));
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM alert_review_record WHERE operator_id=?", Integer.class, admin)).isZero();
         submit("RECOGNITION", ordinary, driverToken).andExpect(status().isConflict());
     }
@@ -187,6 +195,8 @@ class AppealIntegrationTest {
         long second = create("ALERT", openAlert, driverToken);
         assertThat(second).isGreaterThan(first);
         assertThat(appealStatus(first)).isEqualTo("WITHDRAWN");
+        mvc.perform(get("/api/appeals/" + first).header("Authorization", driverToken))
+                .andExpect(jsonPath("$.data.effectiveStatus").value("EFFECTIVE"));
         decide(first, "REVOKED").andExpect(status().isConflict());
     }
 
@@ -267,11 +277,15 @@ class AppealIntegrationTest {
                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value(404));
         mvc.perform(get(url)).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/appeals/" + id + "/materials").header("Authorization", adminToken))
-                .andExpect(jsonPath("$.data[0].downloadUrl").value(url));
+                .andExpect(jsonPath("$.data[0].downloadUrl").value(url))
+                .andExpect(jsonPath("$.data[0].availability").value("AVAILABLE"));
         String relative = jdbc.queryForObject("SELECT relative_path FROM alert_appeal_material WHERE id=?", String.class, material);
         mvc.perform(get("/upload/" + relative).header("Authorization", driverToken)).andExpect(status().isForbidden());
         mvc.perform(get("/upload/" + relative.replace("appeals/", "APPEALS/")).header("Authorization", driverToken)).andExpect(status().isNotFound());
         jdbc.update("UPDATE alert_appeal_material SET relative_path='../outside.pdf' WHERE id=?", material);
+        mvc.perform(get("/api/appeals/" + id + "/materials").header("Authorization", adminToken))
+                .andExpect(jsonPath("$.data[0].id").value(material))
+                .andExpect(jsonPath("$.data[0].availability").value("UNAVAILABLE"));
         mvc.perform(get(url).header("Authorization", adminToken)).andExpect(status().isNotFound());
     }
 
@@ -370,10 +384,18 @@ class AppealIntegrationTest {
 
     @Test void directAlertReviewIsBlockedWhileAppealIsPendingAndRevokedTargetCannotAppeal() throws Exception {
         long id = create("ALERT", openAlert, driverToken);
-        directReview(openAlert, "CONFIRMED").andExpect(status().isConflict());
+        directReview(openAlert, "CONFIRMED").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.data.reason").value("PENDING_APPEAL"))
+                .andExpect(jsonPath("$.data.pendingAppealId").value(id));
+        mvc.perform(get("/api/alerts/" + openAlert).header("Authorization", adminToken))
+                .andExpect(jsonPath("$.data.pendingAppealId").value(id));
+        mvc.perform(get("/api/alerts/" + openAlert).header("Authorization", driverToken))
+                .andExpect(jsonPath("$.data.pendingAppealId").doesNotExist());
         assertThat(alertStatus(openAlert)).isEqualTo("OPEN");
         withdraw(id, driverToken).andExpect(status().isOk());
         directReview(openAlert, "REVOKED").andExpect(status().isOk());
+        directReview(openAlert, "CONFIRMED").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.data.reason").value("ALREADY_REVIEWED"));
         submit("ALERT", openAlert, driverToken).andExpect(status().isConflict());
     }
 

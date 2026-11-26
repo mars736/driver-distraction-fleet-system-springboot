@@ -18,6 +18,7 @@ public class RecognitionView {
     private String driverName;
     private Long fleetId;
     private String fleetName;
+    private String nameSource;
     private LocalDateTime capturedAt;
     private Integer pred;
     private String behaviorCode;
@@ -27,6 +28,7 @@ public class RecognitionView {
     private Boolean ood;
     private Boolean participated;
     private String decisionReason;
+    private String effectiveStatus;
     private Double speedKmh;
     private String speedStatus;
     private LocalDateTime createTime;

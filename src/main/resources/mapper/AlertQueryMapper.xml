@@ -16,7 +16,7 @@
         </where>
     </sql>
     <sql id="viewColumns">
-        a.*, v.plate_no, u.name AS driver_name, f.name AS fleet_name, r.speed_kmh, r.speed_status
+        a.*, <include refid="mapper.RecognitionQueryMapper.names"/>, r.speed_kmh, r.speed_status
     </sql>
     <sql id="viewJoins">
         FROM alert_record a
@@ -35,7 +35,13 @@
         LIMIT #{limit} OFFSET #{offset}
     </select>
     <select id="findAccessible" resultType="vo.alert.AlertView">
-        SELECT <include refid="viewColumns"/> <include refid="viewJoins"/>
+        SELECT <include refid="viewColumns"/>
+        <if test="ownerDriverId == null">
+            , (SELECT p.id FROM alert_appeal p
+               WHERE p.target_type='ALERT' AND p.target_id=a.id AND p.status='PENDING'
+               ORDER BY p.id DESC LIMIT 1) AS pending_appeal_id
+        </if>
+        <include refid="viewJoins"/>
         WHERE a.id = #{id}
         <if test="ownerDriverId != null">AND a.driver_id = #{ownerDriverId}</if>
     </select>

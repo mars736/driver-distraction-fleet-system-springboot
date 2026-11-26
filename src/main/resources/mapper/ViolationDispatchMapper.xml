@@ -19,9 +19,16 @@
           AND a.id=#{alertId}
         ON DUPLICATE KEY UPDATE alert_id=violation_work_order.alert_id
     </insert>
-    <update id="cancelForAlert">
-        UPDATE violation_work_order SET status='CANCELED'
+    <update id="applyRevocation">
+        UPDATE violation_work_order
+        SET status=CASE WHEN status='IN_PROGRESS' THEN 'REVOKE_WRAPUP' ELSE 'CANCELED' END,
+            revocation_source=#{source}, revocation_review_id=#{reviewId}, revoked_at=#{revokedAt}
         WHERE alert_id=#{alertId} AND status IN ('PENDING','ASSIGNED','IN_PROGRESS')
+    </update>
+    <update id="closeRevoked">
+        UPDATE violation_work_order SET status='CLOSED', closed_at=#{now}, closed_by=#{actor},
+            outcome='REVOKED_WRAPUP', resolution=#{input.resolution}, wrapup_work_done=#{input.workDone}
+        WHERE id=#{id} AND status='REVOKE_WRAPUP'
     </update>
     <select id="alertId" resultType="long">
         SELECT alert_id FROM violation_work_order WHERE id=#{id}
@@ -30,7 +37,8 @@
         SELECT w.id, CONCAT('WO-',w.id) AS order_no,w.alert_id,a.driver_id,a.vehicle_id,a.fleet_id,a.captured_at,
           a.record_type,a.behavior_code,a.max_p AS confidence,a.status AS alert_status,w.risk_level,w.status,w.latitude,
           w.longitude,w.position_sampled_at,w.assignee_id,w.assigned_at,w.started_at,w.closed_at,w.closed_by,w.outcome,
-          w.resolution,w.recommendation_action,w.recommendation_note,w.recommendation_by,w.recommendation_at,w.created_at
+          w.resolution,w.recommendation_action,w.recommendation_note,w.recommendation_by,w.recommendation_at,w.created_at,
+          w.revocation_source,w.revocation_review_id,w.revoked_at,w.wrapup_work_done
         FROM violation_work_order w JOIN alert_record a ON a.id=w.alert_id
     </sql>
     <select id="detail" resultType="dto.operations.ViolationDispatch$WorkOrder">

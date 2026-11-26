@@ -18,7 +18,8 @@
 | `POST /orders/{id}/assign` | 手动派发，正文如 `{"assigneeId":2}` |
 | `POST /orders/{id}/assign-nearest` | 派发给当前排序首位且有有效距离的人选 |
 | `POST /orders/{id}/start` | 开始处置 |
-| `POST /orders/{id}/close` | 关闭工单，正文如 `{"outcome":"HANDLED","resolution":"已核对并完成安全沟通"}` |
+| `POST /orders/{id}/close` | 关闭处置中的有效告警工单，正文如 `{"outcome":"HANDLED","resolution":"已核对并完成安全沟通"}` |
+| `POST /orders/{id}/revocation-wrapup` | 管理员关闭待撤销收尾工单，正文如 `{"workDone":"已与司机沟通","resolution":"根据撤销结论停止处置"}` |
 | `GET /orders/{id}/personnel-recommendation` | 查看人员调整建议、有效性及历史决定 |
 | `POST /orders/{id}/personnel-recommendation` | 审核建议，正文如 `{"action":"TRAINING","note":"安排参加安全培训"}` |
 
@@ -35,3 +36,13 @@
 ## 联调顺序
 
 先触发一条违规告警，在工单列表查到对应记录。用两个管理员账号各自上报位置，查看候选排序，按派发、开始、关闭操作。用告警复核或申诉撤销验证工单状态及司机评分。派发、开始、关闭、撤销和人员建议审核均可在统一操作日志中查询。
+
+
+## 撤销后的工单处理
+
+直接复核和申诉通过撤销告警时，`PENDING` 和 `ASSIGNED` 工单自动进入 `CANCELED`。
+`IN_PROGRESS` 工单进入 `REVOKE_WRAPUP`，平台管理员记录已完成的工作和收尾原因后，
+用撤销收尾入口进入 `CLOSED`，结论为 `REVOKED_WRAPUP`。原处置人、派发及开始时间仍可查。
+工单详情包含 `revocationSource`（`DIRECT_REVIEW` 或 `APPEAL`）、`revocationReviewId`、
+`revokedAt` 和 `wrapupWorkDone`。原本已关闭的工单保留结论，通过 `alertStatus` 显示告警后续撤销。
+部署已有数据库时先执行 `20261126_alert_appeal_workflow.sql`。历史工单的原状态保持原样。

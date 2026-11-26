@@ -9,12 +9,14 @@ public final class ViolationDispatch {
     private ViolationDispatch() { }
 
     public enum RiskLevel { HIGH, GENERAL }
-    public enum Status { PENDING, ASSIGNED, IN_PROGRESS, CLOSED, CANCELED }
-    public enum Outcome { HANDLED, NO_ACTION, REFERRED }
+    public enum Status { PENDING, ASSIGNED, IN_PROGRESS, REVOKE_WRAPUP, CLOSED, CANCELED }
+    public enum Outcome { HANDLED, NO_ACTION, REFERRED, REVOKED_WRAPUP }
     public enum PersonnelAction { TRAINING, CHANGE_SHIFT, STOP_SHIFT, DISMISSED }
 
     public record Assign(@NotNull @Positive Long assigneeId) { }
     public record Close(@NotNull Outcome outcome, @NotBlank @Size(max = 500) String resolution) { }
+    public record RevocationWrapup(@NotBlank @Size(max = 500) String workDone,
+                                    @NotBlank @Size(max = 500) String resolution) { }
     public record PersonnelDecision(@NotNull PersonnelAction action, @NotBlank @Size(max = 500) String note) { }
 
     public record WorkOrder(long id, String orderNo, long alertId, Long driverId, long vehicleId, Long fleetId,
@@ -23,7 +25,9 @@ public final class ViolationDispatch {
                             Long positionSampledAt, Long assigneeId, LocalDateTime assignedAt, LocalDateTime startedAt,
                             LocalDateTime closedAt, Long closedBy, Outcome outcome, String resolution,
                             PersonnelAction recommendationAction, String recommendationNote, Long recommendationBy,
-                            LocalDateTime recommendationAt, LocalDateTime createdAt) { }
+                            LocalDateTime recommendationAt, LocalDateTime createdAt,
+                            String revocationSource, Long revocationReviewId, LocalDateTime revokedAt,
+                            String wrapupWorkDone) { }
 
     public record Operator(long userId, String name, Double latitude, Double longitude,
                            LocalDateTime reportedAt, long activeOrders) { }

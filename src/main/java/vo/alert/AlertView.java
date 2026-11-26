@@ -15,6 +15,7 @@ public class AlertView {
     private String driverName;
     private Long fleetId;
     private String fleetName;
+    private String nameSource;
     private LocalDateTime capturedAt;
     private String behaviorCode;
     private Double maxP;
@@ -24,6 +25,7 @@ public class AlertView {
     private boolean smsSimulated;
     private boolean violation;
     private String status;
+    private Long pendingAppealId;
     private Double speedKmh;
     private String speedStatus;
     private String keyFrameUrl;

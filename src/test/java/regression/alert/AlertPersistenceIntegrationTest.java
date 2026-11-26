@@ -157,6 +157,7 @@ class AlertPersistenceIntegrationTest {
 
     @Test
     void timelineUsesAdjacentFramesAndChecksOwnershipForEveryImage() throws Exception {
+        timestamp = System.currentTimeMillis() - 1000;
         for (int i = 0; i < 4; i++) { service.process(input(1, false), false); }
         var alert = service.process(input(1, false), false).getFirst();
         String url = "/api/alerts/" + alert.getId() + "/key-frames";
@@ -166,6 +167,8 @@ class AlertPersistenceIntegrationTest {
         long otherId = insert("INSERT INTO sys_user(username,password,name,role) VALUES (?, 'unused', 'other', 'DRIVER')",
                 UUID.randomUUID().toString());
         try {
+            mvc.perform(get(url + "/availability").header("Authorization", owner)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[2].status").value("PENDING"));
             mvc.perform(get(url).header("Authorization", owner)).andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.length()").value(2))
                     .andExpect(jsonPath("$.data[0].offset").value(-1))
@@ -195,11 +198,32 @@ class AlertPersistenceIntegrationTest {
             mvc.perform(get(url)).andExpect(status().isUnauthorized());
             String after = timelineMapper.list(alert.getId()).getLast().keyFramePath();
             Files.delete(uploads.resolve(after));
+            mvc.perform(get(url + "/availability").header("Authorization", owner)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data[2].status").value("UNREADABLE"));
+            mvc.perform(get(url + "/availability").header("Authorization", other)).andExpect(status().isNotFound());
             mvc.perform(get(url).header("Authorization", owner)).andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.length()").value(2))
                     .andExpect(jsonPath("$.data[1].offset").value(0));
             mvc.perform(get(url + "/1").header("Authorization", owner)).andExpect(status().isNotFound());
         } finally { jdbc.update("DELETE FROM sys_user WHERE id=?", otherId); }
+    }
+
+    @Test
+    void persistedRecognitionAndAlertNamesStayAtTheirOriginalValues() throws Exception {
+        for (int i = 0; i < 4; i++) { service.process(input(1, false), false); }
+        var alert = service.process(input(1, false), false).getFirst();
+        String plate = jdbc.queryForObject("SELECT plate_no FROM vehicle WHERE id=?", String.class, vehicleId);
+        jdbc.update("UPDATE vehicle SET plate_no=? WHERE id=?", "R" + plate, vehicleId);
+        jdbc.update("UPDATE sys_user SET name='已更名司机' WHERE id=?", driverId);
+        jdbc.update("UPDATE fleet SET name='已更名车队' WHERE id=?", fleetId);
+        String owner = "Bearer " + jwt.generateToken(driverId, 0);
+        for (String path : List.of("/api/recognitions/" + alert.getRecognitionId(), "/api/alerts/" + alert.getId())) {
+            mvc.perform(get(path).header("Authorization", owner)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.plateNo").value(plate))
+                    .andExpect(jsonPath("$.data.driverName").value("告警回归测试"))
+                    .andExpect(jsonPath("$.data.fleetName").value("告警回归测试"))
+                    .andExpect(jsonPath("$.data.nameSource").value("SNAPSHOT"));
+        }
     }
 
     @Test

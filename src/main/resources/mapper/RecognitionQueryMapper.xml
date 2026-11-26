@@ -16,10 +16,34 @@
             <if test="filter.endTime != null">AND r.captured_at &lt; #{filter.endTime}</if>
         </where>
     </sql>
+    <!-- 生效的分心告警优先。没有分心告警时，按普通识别本身及其申诉结论判断。 -->
+    <sql id="effectiveStatus">
+        CASE
+            WHEN r.id IS NULL THEN NULL
+            WHEN EXISTS (SELECT 1 FROM alert_record v
+                WHERE v.recognition_id=r.id AND v.record_type IN ('SMS_ALERT','BACKLOG')
+                    AND v.status IN ('OPEN','CONFIRMED')) THEN 'EFFECTIVE'
+            WHEN EXISTS (SELECT 1 FROM alert_record v
+                WHERE v.recognition_id=r.id AND v.record_type IN ('SMS_ALERT','BACKLOG')) THEN 'REVOKED'
+            WHEN r.participated=1 AND r.ood=0 AND r.behavior_code IN ('c1','c2','c3','c4','c5','c6','c7','c8','c9')
+                THEN CASE WHEN EXISTS (SELECT 1 FROM alert_appeal p
+                    WHERE p.target_type='RECOGNITION' AND p.target_id=r.id AND p.status='REVOKED')
+                    THEN 'REVOKED' ELSE 'EFFECTIVE' END
+            ELSE 'NOT_APPLICABLE'
+        END
+    </sql>
+    <sql id="names">
+        CASE WHEN r.names_captured=1 THEN r.plate_no_snapshot ELSE v.plate_no END AS plate_no,
+        CASE WHEN r.names_captured=1 THEN r.driver_name_snapshot ELSE u.name END AS driver_name,
+        CASE WHEN r.names_captured=1 THEN r.fleet_name_snapshot ELSE f.name END AS fleet_name,
+        CASE WHEN r.names_captured=1 THEN 'SNAPSHOT' ELSE 'CURRENT_PROFILE' END AS name_source
+    </sql>
     <sql id="columns">
-        r.id,r.camera_id,r.vehicle_id,v.plate_no,r.driver_id,u.name AS driver_name,r.fleet_id,f.name AS fleet_name,
+        r.id,r.camera_id,r.vehicle_id,r.driver_id,r.fleet_id,
+        <include refid="names"/>,
         r.captured_at,r.pred,r.behavior_code,r.max_p,r.energy,r.knn_dist,r.ood,r.participated,r.decision_reason,
-        r.speed_kmh,r.speed_status,r.key_frame_path,r.create_time,r.update_time
+        r.speed_kmh,r.speed_status,r.key_frame_path,r.create_time,r.update_time,
+        <include refid="effectiveStatus"/> AS effective_status
     </sql>
     <sql id="joins">
         FROM recognition_record r

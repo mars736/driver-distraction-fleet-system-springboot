@@ -49,8 +49,8 @@ public class ViolationDispatchService {
     @EventListener
     @Transactional(propagation = Propagation.MANDATORY)
     public void onAlertRevoked(AlertRevokedEvent event) {
-        if (orders.cancelForAlert(event.alertId()) == 1) {
-            audit.success(OperationAction.DISPATCH_ALERT_REVOKED, event.alertId(), event.fleetId());
+        if (orders.applyRevocation(event) == 1) {
+            audit.success(OperationAction.DISPATCH_ALERT_REVOKED, event.alertId(), event.fleetId(), event.source().name());
         }
     }
 
@@ -112,8 +112,20 @@ public class ViolationDispatchService {
     public WorkOrder close(long id, Close input) {
         long actor = admin().userId();
         var order = lockActiveOrder(id, Status.IN_PROGRESS);
+        check(input.outcome() != Outcome.REVOKED_WRAPUP, 400, "撤销收尾须通过专用入口");
         check(orders.close(id, actor, input, now()) == 1, 409, "工单状态已变更");
         audit.success(OperationAction.DISPATCH_CLOSE, id, order.fleetId(), input.outcome().name());
+        return find(id);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public WorkOrder wrapUpRevocation(long id, RevocationWrapup input) {
+        long actor = admin().userId();
+        var order = lockOrder(id, Status.REVOKE_WRAPUP, true);
+        check(!input.workDone().isBlank() && !input.resolution().isBlank(), 400, "已完成工作和收尾说明不能为空");
+        var notes = new RevocationWrapup(input.workDone().strip(), input.resolution().strip());
+        check(orders.closeRevoked(id, actor, notes, now()) == 1, 409, "工单状态已变更");
+        audit.success(OperationAction.DISPATCH_REVOCATION_WRAPUP, id, order.fleetId());
         return find(id);
     }
 
@@ -136,12 +148,17 @@ public class ViolationDispatchService {
     }
 
     private WorkOrder lockActiveOrder(long id, Status expected) {
+        return lockOrder(id, expected, false);
+    }
+
+    private WorkOrder lockOrder(long id, Status expected, boolean revoked) {
         Long alertId = orders.alertId(id);
         check(alertId != null, 404, "工单不存在");
         // 复用告警锁，派发、关闭与复核撤销按同一顺序串行。
         var alert = alerts.lockAlert(alertId);
         check(alert != null, 404, "关联告警不存在");
-        check(!"REVOKED".equals(alert.getStatus()), 409, "关联告警已撤销");
+        check("REVOKED".equals(alert.getStatus()) == revoked, 409,
+                revoked ? "关联告警尚未撤销" : "关联告警已撤销");
         WorkOrder order = find(id);
         check(order.status() == expected, 409, "当前工单状态不允许该操作");
         return order;

@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import vo.alert.AlertView;
 import vo.alert.AlertTimelineItem;
+import vo.alert.AlertFrameAvailability;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -30,12 +31,14 @@ public class AlertQueryService {
     private static final int MAX_EXPORT_ROWS = 10_000;
     private final AlertQueryMapper mapper;
     private final AlertTimelineMapper timelineMapper;
+    private final AlertTimelineCapture timelineCapture;
     private final Path uploadRoot;
 
     public AlertQueryService(AlertQueryMapper mapper, AlertTimelineMapper timelineMapper,
-            @Value("${file.upload-dir:./upload}") String uploadDir) {
+            AlertTimelineCapture timelineCapture, @Value("${file.upload-dir:./upload}") String uploadDir) {
         this.mapper = mapper;
         this.timelineMapper = timelineMapper;
+        this.timelineCapture = timelineCapture;
         uploadRoot = Path.of(uploadDir).toAbsolutePath().normalize();
     }
 
@@ -100,6 +103,33 @@ public class AlertQueryService {
         }
         items.sort(Comparator.comparingInt(AlertTimelineItem::offset));
         return items;
+    }
+
+    public List<AlertFrameAvailability> timelineAvailability(long id) {
+        AlertView alert = detail(id);
+        boolean awaitingNext = timelineCapture.isAwaitingNext(id, alert.getCameraId());
+        var before = new AlertFrameAvailability(-1, AlertFrameAvailability.Status.NO_FRAME, null, null);
+        var after = new AlertFrameAvailability(1, awaitingNext ? AlertFrameAvailability.Status.PENDING
+                : AlertFrameAvailability.Status.NO_FRAME, null, null);
+        for (var frame : timelineMapper.list(id)) {
+            if (frame.frameOffset() == -1) {
+                before = availability(id, -1, frame.capturedAt(), frame.keyFramePath());
+            } else if (frame.frameOffset() == 1) {
+                after = availability(id, 1, frame.capturedAt(), frame.keyFramePath());
+            }
+        }
+        return List.of(before, availability(id, 0, alert.getCapturedAt(), alert.getKeyFramePath()), after);
+    }
+
+    private AlertFrameAvailability availability(long id, int offset, LocalDateTime capturedAt, String path) {
+        if (path == null || path.isBlank()) {
+            return new AlertFrameAvailability(offset, AlertFrameAvailability.Status.NO_FRAME, capturedAt, null);
+        }
+        if (!isAvailable(path)) {
+            return new AlertFrameAvailability(offset, AlertFrameAvailability.Status.UNREADABLE, capturedAt, null);
+        }
+        String url = "/api/alerts/" + id + (offset == 0 ? "/key-frame" : "/key-frames/" + offset);
+        return new AlertFrameAvailability(offset, AlertFrameAvailability.Status.AVAILABLE, capturedAt, url);
     }
 
     private boolean isAvailable(String relativePath) {
