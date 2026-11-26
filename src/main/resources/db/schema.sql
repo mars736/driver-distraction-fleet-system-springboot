@@ -366,6 +366,8 @@ CREATE TABLE IF NOT EXISTS transport_task (
     ended_at DATETIME(3) NULL,
     end_lat DOUBLE NULL,
     end_lon DOUBLE NULL,
+    request_key VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    UNIQUE KEY uk_task_actor_request (created_by, request_key),
     KEY idx_transport_driver_interval (driver_id, status, starts_at, ends_at),
     KEY idx_transport_vehicle_interval (vehicle_id, status, starts_at, ends_at)
 ) COMMENT '运输任务和出发完成报到';
