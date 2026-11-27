@@ -57,6 +57,6 @@ public class VehicleLiveStatusService {
         return new VehicleLiveStatus(vehicle.getId(), vehicle.getFleetId(), vehicle.getPlateNo(),
                 online, position.sampledAt(), position.latitude(), position.longitude(),
                 online ? position.speedKmh() : null, position.driverId(), locationStatus,
-                now, position.receivedAt(), "GCJ-02", online ? position.movementCheck(vehicle.getFleetId()) : null);
+                now, position.receivedAt(), position.coordinateSystem(), online ? position.movementCheck(vehicle.getFleetId()) : null);
     }
 }

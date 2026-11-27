@@ -14,7 +14,8 @@ public class VehicleTrackController {
     @GetMapping("/api/vehicles/{id}/track")
     public Result<VehicleTrack> track(@PathVariable long id, @RequestParam long startTime, @RequestParam long endTime,
                                      @RequestParam(defaultValue = "1") int page,
-                                     @RequestParam(defaultValue = "500") int pageSize) {
-        return Result.success(service.track(id, startTime, endTime, page, pageSize));
+                                     @RequestParam(defaultValue = "500") int pageSize,
+                                     @RequestParam(required = false) Long snapshotId) {
+        return Result.success(service.track(id, startTime, endTime, page, pageSize, snapshotId));
     }
 }

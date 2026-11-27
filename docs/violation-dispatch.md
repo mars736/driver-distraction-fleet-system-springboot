@@ -25,7 +25,7 @@
 | `GET /orders/{id}/personnel-recommendation` | 查看人员调整建议、有效性及历史决定 |
 | `POST /orders/{id}/personnel-recommendation` | 审核建议，正文如 `{"action":"TRAINING","note":"安排参加安全培训"}` |
 
-状态按 `PENDING → ASSIGNED → IN_PROGRESS → CLOSED` 流转。关闭选项为 `HANDLED`、`NO_ACTION`、`REFERRED`，均需填写处理说明。并发操作只允许一次成功，其余请求按当前状态返回 409。告警复核或申诉撤销时，未关闭工单进入 `CANCELED`。已经关闭的工单可继续查看处理记录和最新告警状态。
+状态按 `PENDING → ASSIGNED → IN_PROGRESS → CLOSED` 流转。关闭选项为 `HANDLED`、`NO_ACTION`、`REFERRED`，均需填写处理说明。并发操作只允许一次成功，其余请求按当前状态返回 409。告警复核或申诉撤销时，待派发和已派发工单进入 `CANCELED`，处理中工单进入 `REVOKE_WRAPUP`，可提交善后记录后关闭。已经关闭的工单可继续查看处理记录和最新告警状态。
 
 管理员位置自上报起 10 分钟内可用于排序。默认以直线距离（km）加 `2 × 未完成工单数` 计算排序值。同分按未完成件数及用户 ID 排序。工单或候选人无有效坐标时仍可人工选择。前端按司机定位约定的坐标系上报位置。
 

@@ -72,6 +72,8 @@ class VehicleTelemetryIntegrationTest {
         jdbc.update("DELETE FROM vehicle_stopped_motion_state WHERE vehicle_id = ?", vehicle);
         jdbc.update("DELETE FROM vehicle_stopped_motion_check WHERE vehicle_id = ?", vehicle);
         jdbc.update("DELETE FROM vehicle_telemetry WHERE vehicle_id = ?", vehicle);
+        jdbc.update("DELETE FROM driver_attendance WHERE shift_id IN (SELECT id FROM driver_shift WHERE fleet_id=?)", fleet);
+        jdbc.update("DELETE FROM driver_shift WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM sys_user WHERE fleet_id = ?", fleet);
         jdbc.update("DELETE FROM vehicle WHERE id = ?", vehicle);
         jdbc.update("DELETE FROM fleet WHERE id = ?", fleet);
@@ -271,6 +273,13 @@ class VehicleTelemetryIntegrationTest {
     @Test
     void concurrentBindingsCanOnlyLeaveOneEnabledDriverAssigned() throws Exception {
         jdbc.update("UPDATE sys_user SET vehicle_id=NULL WHERE id=?", driver);
+        for (long id : new long[]{driver, otherDriver}) {
+            var at = java.time.LocalDateTime.now(java.time.ZoneId.of("Asia/Shanghai"));
+            jdbc.update("INSERT INTO driver_shift(driver_id,fleet_id,shift_date,shift_type,starts_at,ends_at) VALUES(?,?,?,'EARLY',?,?)",
+                    id, fleet, at.toLocalDate(), at.minusHours(1), at.plusHours(1));
+            jdbc.update("INSERT INTO driver_attendance(shift_id,clock_in_at,clock_in_lat,clock_in_lon) "
+                    + "SELECT id,?,0,0 FROM driver_shift WHERE driver_id=?", at, id);
+        }
         String token = adminToken();
         var ready = new CountDownLatch(1);
         try (var pool = Executors.newFixedThreadPool(2)) {
@@ -282,6 +291,34 @@ class VehicleTelemetryIntegrationTest {
         }
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sys_user WHERE enabled=1 AND vehicle_id=?",
                 Integer.class, vehicle)).isEqualTo(1);
+    }
+
+    @Test
+    void trackSnapshotExcludesLateSamplesAndKeepsCoordinateSource() throws Exception {
+        report(driver, sampledAt, "2").andExpect(status().isOk());
+        long begin = sampledAt - 10_000;
+        var first = mvc.perform(track(begin, sampledAt + 1))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalPoints").value(1))
+                .andExpect(jsonPath("$.data.points[0].coordinateSystem").value("GCJ-02"))
+                .andReturn().getResponse();
+        long snapshot = json.readTree(first.getContentAsByteArray()).path("data").path("snapshotId").asLong();
+        assertThat(snapshot).isPositive();
+        report(driver, sampledAt - 3000, "2").andExpect(status().isOk());
+        jdbc.update("INSERT INTO vehicle_telemetry(vehicle_id,driver_id,sampled_at,latitude,longitude) VALUES(?,?,?,24.48,118.08)",
+                vehicle, driver, sampledAt - 2000);
+        mvc.perform(track(begin, sampledAt + 1).param("snapshotId", Long.toString(snapshot)).param("page", "2"))
+                .andExpect(jsonPath("$.data.totalPoints").value(1))
+                .andExpect(jsonPath("$.data.snapshotId").value(snapshot));
+        mvc.perform(track(begin, sampledAt + 1))
+                .andExpect(jsonPath("$.data.totalPoints").value(3))
+                .andExpect(jsonPath("$.data.coordinateSystem").value("MIXED"))
+                .andExpect(jsonPath("$.data.points[1].coordinateSystem").value("UNKNOWN"));
+        mvc.perform(liveStatus()).andExpect(jsonPath("$.data.list[0].coordinateSystem").value("GCJ-02"));
+    }
+
+    private MockHttpServletRequestBuilder track(long start, long end) {
+        return get("/api/vehicles/{id}/track", vehicle).param("startTime", Long.toString(start))
+                .param("endTime", Long.toString(end)).header("Authorization", adminToken());
     }
 
     private int bind(long driverId, String token) throws Exception {

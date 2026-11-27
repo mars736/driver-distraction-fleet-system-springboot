@@ -77,6 +77,11 @@ class CameraMonitoringIntegrationTest {
         vehicle = id("SELECT id FROM vehicle WHERE plate_no=?", "C" + key);
         firstDriver = driver("cam-a-" + key, vehicle);
         secondDriver = driver("cam-b-" + key, null);
+        var at = java.time.LocalDateTime.now(java.time.ZoneId.of("Asia/Shanghai"));
+        jdbc.update("INSERT INTO driver_shift(driver_id,fleet_id,shift_date,shift_type,starts_at,ends_at) VALUES(?,?,?,'EARLY',?,?)",
+                secondDriver, fleet, at.toLocalDate(), at.minusHours(1), at.plusHours(1));
+        jdbc.update("INSERT INTO driver_attendance(shift_id,clock_in_at,clock_in_lat,clock_in_lon) "
+                + "SELECT id,?,0,0 FROM driver_shift WHERE driver_id=?", at, secondDriver);
         long adminId = id("SELECT id FROM sys_user WHERE username='admin'");
         admin = "Bearer " + jwt.generateToken(adminId, 0);
         doAnswer(invocation -> {
@@ -103,6 +108,8 @@ class CameraMonitoringIntegrationTest {
         jdbc.update("DELETE FROM recognition_record WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM alert_vehicle_state WHERE vehicle_id=?", vehicle);
         jdbc.update("DELETE FROM camera WHERE vehicle_id=?", vehicle);
+        jdbc.update("DELETE FROM driver_attendance WHERE shift_id IN (SELECT id FROM driver_shift WHERE fleet_id=?)", fleet);
+        jdbc.update("DELETE FROM driver_shift WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM sys_user WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM vehicle WHERE id=?", vehicle);
         jdbc.update("DELETE FROM operation_log WHERE fleet_id=?", fleet);

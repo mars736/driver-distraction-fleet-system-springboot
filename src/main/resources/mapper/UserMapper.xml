@@ -93,8 +93,7 @@
             name = #{name},
             phone = #{phone},
             fleet_id = #{fleetId},
-            employee_no = #{employeeNo},
-            vehicle_id = #{vehicleId}
+            employee_no = #{employeeNo}
         WHERE id = #{id}
     </update>
 

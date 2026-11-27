@@ -17,7 +17,11 @@ public final class WorkforceConflict extends BusinessException {
         TASK_OVERLAPS_LEAVE("任务与已批准请假重叠"),
         FLEET_STOPPED("车队已停运"),
         FLEET_BINDING_CHANGED("司机所属车队已变更，请刷新后再操作"),
-        TASK_REQUEST_KEY_REUSED("申请标识已用于不同的派单条件");
+        TASK_REQUEST_KEY_REUSED("申请标识已用于不同的派单条件"),
+        SHIFT_PAST_DATE("历史排班不可修改或补录"),
+        SHIFT_VERSION_CONFLICT("排班已被修改，请刷新"),
+        SHIFT_OVERLAPS_REST("工作班次与休息日重叠"),
+        REST_OVERLAPS_SHIFT("休息日与跨夜工作班次重叠");
 
         private final String message;
 

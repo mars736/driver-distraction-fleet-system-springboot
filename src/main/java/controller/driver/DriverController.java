@@ -5,6 +5,8 @@ import common.response.Result;
 import entity.User;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.http.ResponseEntity;
+import service.driver.DriverEmployeeNoConflict;
 import service.driver.DriverService;
 
 /**
@@ -53,6 +55,14 @@ public class DriverController {
         driverService.updateVehicle(id, vehicleId);
         return Result.success();
     }
+
+    @ExceptionHandler(DriverEmployeeNoConflict.class)
+    public ResponseEntity<Result<FieldConflict>> employeeNoConflict(DriverEmployeeNoConflict exception) {
+        return ResponseEntity.status(409).body(new Result<>(409, exception.getMessage(),
+                new FieldConflict("EMPLOYEE_NO_CONFLICT", "employeeNo")));
+    }
+
+    public record FieldConflict(String reason, String field) { }
 
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
