@@ -16,8 +16,11 @@ public interface VehicleTelemetryMapper {
     record MotionState(long vehicleId, long fleetId, long driverId, long stoppedAt, long lastSampledAt,
                        boolean aboveThreshold, Long checkId) { }
 
+    long trackWatermark(@Param("vehicleId") long vehicleId);
+
     List<VehiclePosition> findTrack(@Param("vehicleId") long vehicleId, @Param("start") long start,
-                                    @Param("end") long end, @Param("limit") int limit);
+                                    @Param("end") long end, @Param("snapshotId") long snapshotId,
+                                    @Param("limit") int limit);
     void insertSample(@Param("vehicleId") long vehicleId, @Param("driverId") long driverId,
                       @Param("sampledAt") long sampledAt, @Param("latitude") double latitude,
                       @Param("longitude") double longitude, @Param("speedKmh") Double speedKmh,

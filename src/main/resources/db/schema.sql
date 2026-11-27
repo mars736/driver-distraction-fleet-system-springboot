@@ -207,6 +207,10 @@ CREATE TABLE IF NOT EXISTS vehicle_telemetry (
     longitude DOUBLE NOT NULL,
     speed_kmh DOUBLE NULL COMMENT '设备未取得有效速度时为空',
     received_at BIGINT NULL COMMENT '后端接收时间，Unix 毫秒',
+    coordinate_system VARCHAR(8) NOT NULL DEFAULT 'UNKNOWN',
+    ingest_id BIGINT NOT NULL AUTO_INCREMENT,
+    UNIQUE KEY uk_vehicle_telemetry_ingest (ingest_id),
+    KEY idx_vehicle_telemetry_watermark (vehicle_id, ingest_id),
     PRIMARY KEY (vehicle_id, driver_id, sampled_at),
     KEY idx_vehicle_telemetry_track (vehicle_id, sampled_at, driver_id)
 ) COMMENT '司机 App 车辆定位与速度样本';
@@ -320,8 +324,24 @@ CREATE TABLE IF NOT EXISTS driver_shift (
     shift_type VARCHAR(8) NOT NULL,
     starts_at DATETIME(3) NULL,
     ends_at DATETIME(3) NULL,
+    version BIGINT NOT NULL DEFAULT 1,
     UNIQUE KEY uk_driver_shift_date (driver_id, shift_date)
 ) COMMENT '司机排班';
+
+CREATE TABLE IF NOT EXISTS driver_shift_revision (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    shift_id BIGINT NOT NULL,
+    version BIGINT NOT NULL,
+    operator_id BIGINT NOT NULL,
+    changed_at DATETIME(3) NOT NULL,
+    before_type VARCHAR(8) NULL,
+    before_starts_at DATETIME(3) NULL,
+    before_ends_at DATETIME(3) NULL,
+    after_type VARCHAR(8) NOT NULL,
+    after_starts_at DATETIME(3) NULL,
+    after_ends_at DATETIME(3) NULL,
+    UNIQUE KEY uk_shift_revision (shift_id,version)
+) COMMENT '管理员排班变更历史';
 
 CREATE TABLE IF NOT EXISTS driver_attendance (
     shift_id BIGINT PRIMARY KEY,

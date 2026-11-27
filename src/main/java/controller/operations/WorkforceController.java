@@ -22,6 +22,11 @@ public class WorkforceController {
     @PutMapping("/shifts")
     public Result<Shift> shift(@Valid @RequestBody ShiftRequest request) { return Result.success(service.saveShift(request)); }
 
+    @GetMapping("/shifts/{id}/history")
+    public Result<List<ShiftRevision>> shiftHistory(@PathVariable long id) {
+        return Result.success(service.shiftHistory(id));
+    }
+
     @GetMapping("/shifts")
     public Result<List<ShiftAttendance>> schedule(@RequestParam(required = false) Long driverId,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,

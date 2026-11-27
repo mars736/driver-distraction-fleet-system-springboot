@@ -12,7 +12,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    USE driver_fleet;
    ```
 
-   新库执行 `src/main/resources/db/schema.sql`，创建三十六张业务表。已有申诉模块的数据库按顺序执行以下迁移。更旧的数据库先执行告警复核及申诉迁移。应用启动时不会自动执行这些脚本。
+   新库执行 `src/main/resources/db/schema.sql`，创建三十七张业务表。已有申诉模块的数据库按顺序执行以下迁移。更旧的数据库先执行告警复核及申诉迁移。应用启动时不会自动执行这些脚本。
 
    - `src/main/resources/db/migrations/20261119_vehicle_telemetry.sql`
    - `src/main/resources/db/migrations/20261120_alert_key_frame_timeline.sql`
@@ -32,6 +32,18 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    - `src/main/resources/db/migrations/20261126_workforce_task_attendance.sql`
    - `src/main/resources/db/migrations/20261126_fleet_care_certificates_fuel.sql`
    - `src/main/resources/db/migrations/20261126_camera_config_and_audit_identity.sql`
+   - `src/main/resources/db/migrations/20261126_backend_acceptance.sql`
+
+   执行最后一条迁移前，旧库可用以下查询找出缺少关联档案的数据。若有结果，先核对并修复归属，再执行迁移。
+
+   ```sql
+   SELECT v.id, v.fleet_id FROM vehicle v LEFT JOIN fleet f ON f.id = v.fleet_id
+     WHERE v.fleet_id IS NOT NULL AND f.id IS NULL;
+   SELECT u.id, u.vehicle_id FROM sys_user u LEFT JOIN vehicle v ON v.id = u.vehicle_id
+     WHERE u.vehicle_id IS NOT NULL AND v.id IS NULL;
+   SELECT c.id, c.vehicle_id FROM camera c LEFT JOIN vehicle v ON v.id = c.vehicle_id
+     WHERE c.vehicle_id IS NOT NULL AND v.id IS NULL;
+   ```
 3. 在 `src/main/resources/application.yml` 中配置 `spring.datasource` 的地址、用户名和密码。启动前必须完成建库、建表，因为应用初始化时会查询摄像头表。
 4. 在项目根目录执行：
 
@@ -76,13 +88,26 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 
 违规处置支持自动建单、手动与就近派发、工单关闭和人员建议审核。参见 [违规处置工单联调](docs/violation-dispatch.md)。
 
+## 接口文档
+
+- [离线 HTML 接口文档](docs/api/index.html)可直接在浏览器打开和搜索。
+- [OpenAPI JSON](docs/api/openapi.json)可导入 Apifox 或 Swagger 工具。包含 Bearer JWT、SSE 票据、请求体、响应及二进制下载格式。
+
+更新文档时，使用 JDK 21，将 Spring 数据源指向已导入完整 schema 的隔离 MySQL 库，再执行：
+
+```powershell
+$env:DRIVER_FLEET_OPENAPI_OUTPUT = Join-Path (Get-Location) 'docs/api'
+.\mvnw.cmd '-Papi-docs' '-Dtest=OpenApiExportTest' test
+Remove-Item Env:DRIVER_FLEET_OPENAPI_OUTPUT
+```
+
 ## 验证
 
 ```powershell
 # 权限和进程生命周期回归测试，不需要 MySQL、FFmpeg 或推理服务
 .\mvnw.cmd "-Dtest=CameraSecurityTest,FfmpegManagerTest" test
 
-# 全部常规测试：现有 contextLoads 测试需要配置可用的 MySQL 和上述三十六张表
+# 全部常规测试：现有 contextLoads 测试需要配置可用的 MySQL 和上述业务表
 .\mvnw.cmd test
 ```
 

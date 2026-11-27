@@ -81,6 +81,7 @@ class FleetOperationsIntegrationTest {
             jdbc.update("DELETE FROM " + table + " WHERE vehicle_id IN (SELECT id FROM vehicle WHERE fleet_id=?)", fleet);
         }
         jdbc.update("DELETE FROM driver_attendance WHERE shift_id IN (SELECT id FROM driver_shift WHERE fleet_id=?)", fleet);
+        jdbc.update("DELETE FROM driver_shift_revision WHERE shift_id IN (SELECT id FROM driver_shift WHERE fleet_id=?)", fleet);
         jdbc.update("DELETE FROM driver_shift WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM driver_leave WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM transport_task WHERE fleet_id=?", fleet);
@@ -94,8 +95,7 @@ class FleetOperationsIntegrationTest {
     void activeShiftAllowsExactlyOneConcurrentDispatchAndCrossDayAttendanceDeduplicates() throws Exception {
         var starts = now.minusMinutes(20);
         var ends = now.plusHours(4);
-        var shift = call(HttpMethod.PUT, WORK + "/shifts", admin, Map.of("driverId", driver, "date", starts.toLocalDate(),
-                "type", "LATE", "startsAt", starts, "endsAt", ends), 200);
+        long shift = saveActiveShift(starts, ends);
         var trip = Map.of("driverId", driver, "vehicleId", vehicle, "type", "运输",
                 "description", "跨天运输", "startsAt", now.minusMinutes(1), "endsAt", now.plusDays(1));
         call(HttpMethod.POST, WORK + "/tasks", admin, trip, 409);
@@ -103,7 +103,7 @@ class FleetOperationsIntegrationTest {
         var punch = Map.of("shiftDate", starts.toLocalDate(), "position", point);
         call(HttpMethod.POST, WORK + "/attendance/in", driver, punch, 200);
         call(HttpMethod.POST, WORK + "/attendance/in", driver, punch, 200);
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM driver_attendance WHERE shift_id=?", Integer.class, id(shift))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM driver_attendance WHERE shift_id=?", Integer.class, shift)).isEqualTo(1);
         assertThat(call(HttpMethod.GET, WORK + "/on-duty?fleetId=" + fleet, admin, null, 200).get(0).path("driverId").asLong())
                 .isEqualTo(driver);
 
@@ -227,7 +227,7 @@ class FleetOperationsIntegrationTest {
                 UPDATE transport_task SET status='RUNNING', starts_at=?, ends_at=?, departed_at=? WHERE id=?
                 """, departed.minusHours(1), departed.plusHours(1), departed, current);
         assertThat(call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(today.minusDays(1)), 409)
-                .path("reason").asText()).isEqualTo("REST_OVERLAPS_TASK");
+                .path("reason").asText()).isEqualTo("SHIFT_PAST_DATE");
         var leave = requestLeave(today.minusDays(1).atStartOfDay(), now.plusMinutes(30));
         assertThat(call(HttpMethod.POST, WORK + "/leaves/" + leave + "/decision", admin, Map.of("approved", true), 409)
                 .path("reason").asText()).isEqualTo("LEAVE_OVERLAPS_SHIFT");
@@ -330,8 +330,12 @@ class FleetOperationsIntegrationTest {
         var day = today.minusDays(4);
         var end = day.plusDays(1);
         for (var date : List.of(day, end)) {
-            long shift = id(call(HttpMethod.PUT, WORK + "/shifts", admin,
-                    workShift(date.atTime(8, 0), date.atTime(16, 0)), 200));
+            jdbc.update("""
+                    INSERT INTO driver_shift(driver_id,fleet_id,shift_date,shift_type,starts_at,ends_at)
+                    VALUES (?,?,?,'EARLY',?,?)
+                    """, driver, fleet, date, date.atTime(8, 0), date.atTime(16, 0));
+            long shift = jdbc.queryForObject("SELECT id FROM driver_shift WHERE driver_id=? AND shift_date=?",
+                    Long.class, driver, date);
             jdbc.update("""
                     INSERT INTO driver_attendance(shift_id,clock_in_at,clock_in_lat,clock_in_lon)
                     VALUES(?,?,24.48,118.08)
@@ -359,9 +363,83 @@ class FleetOperationsIntegrationTest {
         assertThat(following.path("leaveDays").asInt()).isZero();
     }
 
+    @Test
+    void shiftHistoryBlocksPastDatesAndChecksRestOnBothSidesOfMidnight() throws Exception {
+        assertThat(call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(today.minusDays(1)), 409)
+                .path("reason").asText()).isEqualTo("SHIFT_PAST_DATE");
+        var first = today.plusDays(3);
+        call(HttpMethod.PUT, WORK + "/shifts", admin,
+                workShift(first.atTime(20, 0), first.plusDays(1).atTime(4, 0)), 200);
+        assertThat(call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(first.plusDays(1)), 409)
+                .path("reason").asText()).isEqualTo("REST_OVERLAPS_SHIFT");
+        var second = today.plusDays(6);
+        call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(second.plusDays(1)), 200);
+        assertThat(call(HttpMethod.PUT, WORK + "/shifts", admin,
+                workShift(second.atTime(20, 0), second.plusDays(1).atTime(4, 0)), 409)
+                .path("reason").asText()).isEqualTo("SHIFT_OVERLAPS_REST");
+        call(HttpMethod.PUT, WORK + "/shifts", admin,
+                workShift(second.atTime(20, 0), second.plusDays(1).atStartOfDay()), 200);
+
+        var editable = today.plusDays(9);
+        var saved = call(HttpMethod.PUT, WORK + "/shifts", admin, restRequest(editable), 200);
+        assertThat(saved.path("version").asLong()).isEqualTo(1);
+        var change = new java.util.HashMap<>(workShift(editable.atTime(8, 0), editable.atTime(16, 0)));
+        change.put("expectedVersion", 1);
+        long secondAdmin = user("editor", "PLATFORM_ADMIN", null);
+        race(() -> rawStatus(HttpMethod.PUT, WORK + "/shifts", admin, change),
+                () -> rawStatus(HttpMethod.PUT, WORK + "/shifts", secondAdmin, change));
+        var history = call(HttpMethod.GET, WORK + "/shifts/" + id(saved) + "/history", admin, null, 200);
+        assertThat(history).hasSize(2);
+        assertThat(history.get(1).path("beforeType").asText()).isEqualTo("REST");
+        assertThat(history.get(1).path("afterType").asText()).isEqualTo("LATE");
+        assertThat(history.get(1).path("version").asLong()).isEqualTo(2);
+    }
+
+    @Test
+    void driverProfilesPreserveBindingsAndStoppedFleetAndRunningTaskRejectChanges() throws Exception {
+        String path = "/api/drivers/" + driver;
+        var profile = Map.of("fleetId", fleet, "employeeNo", key + "-updated", "name", "资料更新", "phone", "13800138000");
+        call(HttpMethod.PATCH, "/api/fleets/" + fleet + "/enabled?enabled=false", admin, null, 200);
+        var create = Map.of("fleetId", fleet, "employeeNo", key + "-new", "name", "司机", "phone", "13800138001", "password", "Test1234");
+        assertThat(driverResponse(HttpMethod.POST, "/api/drivers", create).path("code").asInt()).isEqualTo(409);
+        assertThat(driverResponse(HttpMethod.PUT, path, profile).path("data").path("vehicleId").asLong()).isEqualTo(vehicle);
+
+        call(HttpMethod.PATCH, "/api/fleets/" + fleet + "/enabled?enabled=true", admin, null, 200);
+        long replacement = vehicle("n");
+        assertThat(driverResponse(HttpMethod.PATCH, path + "/vehicle?vehicleId=" + replacement, null)
+                .path("code").asInt()).isEqualTo(409);
+        prepareOnDuty();
+        var stale = new java.util.HashMap<>(profile);
+        stale.put("vehicleId", vehicle);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var edit = pool.submit(() -> driverResponse(HttpMethod.PUT, path, stale));
+            var bind = pool.submit(() -> driverResponse(HttpMethod.PATCH, path + "/vehicle?vehicleId=" + replacement, null));
+            assertThat(edit.get(10, TimeUnit.SECONDS).path("code").asInt()).isEqualTo(200);
+            assertThat(bind.get(10, TimeUnit.SECONDS).path("code").asInt()).isEqualTo(200);
+        }
+        assertThat(driverResponse(HttpMethod.GET, path, null).path("data").path("vehicleId").asLong()).isEqualTo(replacement);
+        jdbc.update("""
+                INSERT INTO transport_task(driver_id,vehicle_id,fleet_id,task_type,description,starts_at,ends_at,status,
+                    created_by,created_at,departed_at)
+                VALUES(?,?,?,'测试','在途保护',?,?,'RUNNING',?,?,?)
+                """, driver, replacement, fleet, now.minusMinutes(10), now.plusHours(1), admin, now, now);
+        assertThat(driverResponse(HttpMethod.PATCH, path + "/vehicle", null).path("code").asInt()).isEqualTo(409);
+        var collision = new java.util.HashMap<>(create);
+        collision.put("employeeNo", key + "m");
+        var conflict = driverResponse(HttpMethod.POST, "/api/drivers", collision);
+        assertThat(conflict.path("code").asInt()).isEqualTo(409);
+        assertThat(conflict.path("data").path("field").asText()).isEqualTo("employeeNo");
+    }
+
+    private JsonNode driverResponse(HttpMethod method, String path, Object body) throws Exception {
+        var req = request(method, path).header("Authorization", "Bearer " + jwt.generateToken(admin, 0));
+        if (body != null) { req.contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(body)); }
+        return json.readTree(mvc.perform(req).andReturn().getResponse().getContentAsByteArray());
+    }
+
     private void prepareOnDuty() throws Exception {
         var starts = now.minusMinutes(20);
-        call(HttpMethod.PUT, WORK + "/shifts", admin, workShift(starts, now.plusHours(2)), 200);
+        saveActiveShift(starts, now.plusHours(2));
         call(HttpMethod.POST, WORK + "/attendance/in", driver, Map.of("shiftDate", starts.toLocalDate(),
                 "position", Map.of("latitude", 24.48, "longitude", 118.08)), 200);
     }
@@ -371,13 +449,26 @@ class FleetOperationsIntegrationTest {
                 "startsAt", starts, "endsAt", ends);
     }
 
+    private long saveActiveShift(LocalDateTime starts, LocalDateTime ends) throws Exception {
+        var shiftDate = starts.toLocalDate();
+        if (shiftDate.isBefore(today)) {
+            jdbc.update("""
+                    INSERT INTO driver_shift(driver_id,fleet_id,shift_date,shift_type,starts_at,ends_at)
+                    VALUES(?,?,?,'LATE',?,?)
+                    """, driver, fleet, shiftDate, starts, ends);
+            return jdbc.queryForObject("SELECT id FROM driver_shift WHERE driver_id=? AND shift_date=?",
+                    Long.class, driver, shiftDate);
+        }
+        return id(call(HttpMethod.PUT, WORK + "/shifts", admin, workShift(starts, ends), 200));
+    }
+
     private Map<String, Object> workShift(LocalDateTime starts, LocalDateTime ends) {
         return Map.of("driverId", driver, "date", starts.toLocalDate(), "type", "LATE",
-                "startsAt", starts, "endsAt", ends);
+                "startsAt", starts, "endsAt", ends, "expectedVersion", 0);
     }
 
     private Map<String, Object> restRequest(LocalDate date) {
-        return Map.of("driverId", driver, "date", date, "type", "REST");
+        return Map.of("driverId", driver, "date", date, "type", "REST", "expectedVersion", 0);
     }
 
     private long requestLeave(LocalDateTime starts, LocalDateTime ends) throws Exception {

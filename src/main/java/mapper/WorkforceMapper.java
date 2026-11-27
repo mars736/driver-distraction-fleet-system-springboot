@@ -19,12 +19,25 @@ public interface WorkforceMapper {
             @Param("start") LocalDateTime start,
             @Param("end") LocalDateTime end);
 
-    void saveShift(@Param("driverId") long driverId,
+    void insertShift(@Param("driverId") long driverId,
             @Param("fleetId") long fleetId,
             @Param("date") LocalDate date,
             @Param("type") ShiftType type,
             @Param("start") LocalDateTime start,
             @Param("end") LocalDateTime end);
+
+    int updateShift(@Param("id") long id, @Param("version") long version, @Param("fleetId") long fleetId,
+            @Param("type") ShiftType type, @Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    boolean restOverlapExcept(@Param("driverId") long driverId, @Param("date") LocalDate date,
+            @Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    Shift shiftById(@Param("id") long id);
+
+    void recordShiftRevision(@Param("before") Shift before, @Param("after") Shift after,
+            @Param("actor") long actor, @Param("at") LocalDateTime at);
+
+    List<ShiftRevision> shiftRevisions(@Param("id") long id);
 
     Attendance attendance(@Param("shiftId") long shiftId);
 
