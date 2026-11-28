@@ -1,5 +1,6 @@
 package regression;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -55,6 +56,23 @@ class OpenApiExportTest {
         enhance(spec);
         assertThat(spec.path("paths").size()).isGreaterThan(50);
         assertThat(spec.at("/components/schemas/ShiftRequest/properties/expectedVersion").isObject()).isTrue();
+        assertThat(spec.at("/components/schemas/Task/properties/destinationAddress").isObject()).isTrue();
+        var operations = spec.path("paths");
+        String orderPath = "/api/operations/transport-orders/{id}";
+        var assignment = operations.path(orderPath + "/assign").path("post");
+        assertThat(assignment.path("parameters").toString()).contains("Idempotency-Key");
+        var assignmentBody = resolveSchema(spec, assignment.at("/requestBody/content/application~1json/schema"));
+        assertThat(assignmentBody.path("required").toString()).contains("driverId", "vehicleId", "expectedVersion");
+        var orderResponse = resolveSchema(spec, operations.path(orderPath).path("get")
+                .at("/responses/200/content/application~1json/schema"));
+        assertThat(resolveSchema(spec, orderResponse.at("/properties/data")).at("/properties/assignments").isObject()).isTrue();
+        var candidateResponse = resolveSchema(spec, operations.path(orderPath + "/candidates").path("get")
+                .at("/responses/200/content/application~1json/schema"));
+        var candidatePage = resolveSchema(spec, candidateResponse.at("/properties/data"));
+        assertThat(resolveSchema(spec, candidatePage.at("/properties/list/items")).at("/properties/plateNo").isObject())
+                .isTrue();
+        assertThat(assignment.at("/responses/409/content/application~1json/examples/RATING_UNAVAILABLE/value/data/reason")
+                .asText()).isEqualTo("RATING_UNAVAILABLE");
         var shifts = spec.path("paths").path("/api/operations/workforce/shifts").path("put");
         var shiftExamples = shifts.at("/requestBody/content/application~1json/examples");
         assertThat(shiftExamples.at("/create/value/expectedVersion").asLong(-1)).isZero();
@@ -100,6 +118,12 @@ class OpenApiExportTest {
         coordinateSystems(schemas, "Point", false, "GCJ-02", "UNKNOWN");
         coordinateSystems(schemas, "VehicleLiveStatus", true, "GCJ-02", "UNKNOWN");
         coordinateSystems(schemas, "VehicleTrack", true, "GCJ-02", "UNKNOWN", "MIXED");
+        nullableFields(schemas, "Task", "orderId", "orderNo", "originAddress", "destinationAddress");
+        nullableFields(schemas, "OrderRow", "taskId", "driverId", "vehicleId");
+        nullableFields(schemas, "TransportOrderDetail", "taskId", "driverId", "vehicleId");
+        nullableFields(schemas, "TransportOrderCandidate", "vehicleId", "plateNo", "unavailableReason");
+        ((ObjectNode) schemas.at("/TransportOrderCandidate/properties/unavailableReason")).withArrayProperty("enum").addNull();
+        ((ObjectNode) schemas.path("SafetyRating")).put("nullable", true);
 
         var paths = spec.withObjectProperty("paths");
         paths.properties().forEach(path -> path.getValue().properties().forEach(method -> {
@@ -119,6 +143,7 @@ class OpenApiExportTest {
             errorResponse(responses, "default", "业务或请求错误，使用 code、message、data 响应");
         }));
         shiftContract((ObjectNode) paths.path("/api/operations/workforce/shifts").path("put"));
+        transportOrderContract(paths);
         var employeeNoConflict = conflict("工号与已有登录名或工号重复",
                 Map.of("EMPLOYEE_NO_CONFLICT", "工号已被用作现有账号的登录名或工号"), "employeeNo");
         ((ObjectNode) paths.path("/api/drivers").path("post").path("responses")).set("409", employeeNoConflict);
@@ -163,6 +188,44 @@ class OpenApiExportTest {
         streamHead.putObject("405").put("description", "仅支持 GET 订阅").putObject("headers")
                 .putObject("Allow").putObject("schema").put("type", "string").put("example", "GET");
         responses(paths, "/api/alerts/stream", "get", "429", "订阅连接超过服务端限制，请退避重试");
+    }
+
+    private static JsonNode resolveSchema(ObjectNode spec, JsonNode reference) {
+        return spec.at(reference.path("$ref").asText().substring(1));
+    }
+
+    private static void nullableFields(ObjectNode schemas, String name, String... fields) {
+        var properties = schemas.path(name).path("properties");
+        for (String field : fields) {
+            ((ObjectNode) properties.path(field)).put("nullable", true);
+        }
+    }
+
+    private static void transportOrderContract(ObjectNode paths) {
+        String root = "/api/operations/transport-orders";
+        var create = (ObjectNode) paths.path(root).path("post").at("/requestBody/content/application~1json");
+        create.putObject("example").put("fleetId", 1).put("taskType", "器械运输").put("description", "送货交接")
+                .put("originAddress", "集美区示例路 10 号 A 库").put("destinationAddress", "湖里区示例路 20 号收货口")
+                .put("startsAt", "2030-12-03T08:00:00").put("endsAt", "2030-12-03T12:00:00")
+                .put("requirement", "NORMAL");
+
+        var assign = (ObjectNode) paths.path(root + "/{id}/assign").path("post");
+        ((ObjectNode) assign.at("/requestBody/content/application~1json"))
+                .putObject("example").put("driverId", 18).put("vehicleId", 42).put("expectedVersion", 1);
+        assign.withObjectProperty("responses").set("409", conflict("订单派发或候选资格冲突", Map.of(
+                "ORDER_VERSION_CONFLICT", "订单已变化，请刷新后再操作",
+                "ORDER_NOT_DISPATCHABLE", "订单当前不在待派单状态",
+                "ORDER_REQUEST_KEY_REUSED", "请求标识已用于不同派发条件",
+                "RATING_UNAVAILABLE", "高要求任务需要已发布的司机长期评级",
+                "DRIVER_NOT_ELIGIBLE", "司机或车辆已有冲突任务"), null));
+
+        var orderStateConflict = conflict("订单状态或版本已变化", Map.of(
+                "ORDER_NOT_DISPATCHABLE", "订单当前不在待派单状态",
+                "ORDER_VERSION_CONFLICT", "订单已变化，请刷新后再操作"), null);
+        ((ObjectNode) paths.path(root + "/{id}").path("put").path("responses")).set("409", orderStateConflict);
+        ((ObjectNode) paths.path(root + "/{id}/cancel").path("post").path("responses"))
+                .set("409", orderStateConflict.deepCopy());
+        detail(paths, root + "/{id}/assign", "post", "重试同一派发使用相同 Idempotency-Key 和请求内容。");
     }
 
     private static void shiftContract(ObjectNode operation) {

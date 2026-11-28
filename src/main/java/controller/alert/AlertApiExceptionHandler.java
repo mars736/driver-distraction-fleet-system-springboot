@@ -8,6 +8,7 @@ import controller.telemetry.VehicleLiveStatusController;
 import controller.audit.OperationLogController;
 import controller.operations.FleetCareController;
 import controller.operations.OperationsReminderController;
+import controller.operations.TransportOrderController;
 import controller.operations.WorkforceController;
 import controller.operations.ViolationDispatchController;
 import common.response.Result;
@@ -32,7 +33,8 @@ import java.io.IOException;
         AppealController.class, AlertLiveController.class, AlertReportController.class,
         DriverScoreController.class, VehicleTelemetryController.class, VehicleLiveStatusController.class,
         OperationLogController.class, WorkforceController.class, FleetCareController.class,
-        OperationsReminderController.class, ViolationDispatchController.class, CameraController.class})
+        OperationsReminderController.class, ViolationDispatchController.class, CameraController.class,
+        TransportOrderController.class})
 @Slf4j
 public class AlertApiExceptionHandler {
     @ExceptionHandler(AlertReviewConflict.class)

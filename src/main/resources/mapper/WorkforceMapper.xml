@@ -8,7 +8,10 @@
 
     <sql id="taskColumns">
         SELECT id,driver_id,vehicle_id,fleet_id,task_type,description,starts_at,ends_at,status,created_by,created_at,
-            departed_at,depart_lat,depart_lon,ended_at,end_lat,end_lon
+            departed_at,depart_lat,depart_lon,ended_at,end_lat,end_lon,
+            transport_order_id AS order_id,
+            (SELECT o.order_no FROM transport_order o WHERE o.id=transport_task.transport_order_id) AS order_no,
+            origin_address,destination_address,requirement
         FROM transport_task
     </sql>
 
@@ -157,6 +160,11 @@
         WHERE id=#{id}
     </select>
 
+    <select id="orderedTasks" resultType="dto.operations.Workforce$Task">
+        <include refid="taskColumns"/>
+        WHERE transport_order_id=#{orderId} ORDER BY id DESC
+    </select>
+
     <select id="tasks" resultType="dto.operations.Workforce$Task">
         <include refid="taskColumns"/>
         WHERE (#{driverId} IS NULL OR driver_id=#{driverId}) AND (#{fleetId} IS NULL OR fleet_id=#{fleetId})
@@ -185,9 +193,17 @@
     </select>
 
     <insert id="createTask">
-        INSERT INTO transport_task(driver_id,vehicle_id,fleet_id,task_type,description,starts_at,ends_at,status,created_by,created_at,request_key)
+        INSERT INTO transport_task(driver_id,vehicle_id,fleet_id,task_type,description,starts_at,ends_at,status,created_by,created_at,request_key
+            <if test="order != null">
+                ,transport_order_id,origin_address,destination_address,requirement,order_dispatch_key,dispatch_order_version
+            </if>
+        )
         VALUES(#{input.driverId},#{input.vehicleId},#{fleetId},#{input.type},#{input.description},#{input.startsAt},
-            #{input.endsAt},'PENDING',#{actor},#{now},#{requestKey})
+            #{input.endsAt},'PENDING',#{actor},#{now},#{requestKey}
+            <if test="order != null">
+                ,#{order.orderId},#{order.originAddress},#{order.destinationAddress},#{order.requirement},#{order.requestKey},#{order.expectedVersion}
+            </if>
+        )
     </insert>
 
     <update id="depart">

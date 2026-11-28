@@ -12,7 +12,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    USE driver_fleet;
    ```
 
-   新库执行 `src/main/resources/db/schema.sql`，创建三十七张业务表。已有申诉模块的数据库按顺序执行以下迁移。更旧的数据库先执行告警复核及申诉迁移。应用启动时不会自动执行这些脚本。
+   新库执行 `src/main/resources/db/schema.sql`，创建三十八张业务表。已有申诉模块的数据库按顺序执行以下迁移。更旧的数据库先执行告警复核及申诉迁移。应用启动时不会自动执行这些脚本。
 
    - `src/main/resources/db/migrations/20261119_vehicle_telemetry.sql`
    - `src/main/resources/db/migrations/20261120_alert_key_frame_timeline.sql`
@@ -33,6 +33,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    - `src/main/resources/db/migrations/20261126_fleet_care_certificates_fuel.sql`
    - `src/main/resources/db/migrations/20261126_camera_config_and_audit_identity.sql`
    - `src/main/resources/db/migrations/20261126_backend_acceptance.sql`
+   - `src/main/resources/db/migrations/20261128_transport_orders.sql`
 
    执行最后一条迁移前，旧库可用以下查询找出缺少关联档案的数据。若有结果，先核对并修复归属，再执行迁移。
 
@@ -85,6 +86,8 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 告警时间线提供 `GET /api/alerts/{id}/key-frames`，按顺序返回可用的前一帧、触发帧和后一帧。权限及前端接入方式见 [告警关键帧时间线](docs/alert-key-frame-timeline.md)。
 
 车队运营提供排班打卡、请假审批、运输任务、维保油耗和证照提醒。接口与移库步骤见 [车队运营联调](docs/fleet-operations.md)。
+
+管理员可先登记运输订单与两端地址，再从同车队候选司机中确认派发。司机使用现有任务接口报到，详情返回订单地址。参见 [运输订单与派单联调](docs/transport-orders.md)。
 
 违规处置支持自动建单、手动与就近派发、工单关闭和人员建议审核。参见 [违规处置工单联调](docs/violation-dispatch.md)。
 

@@ -8,6 +8,7 @@ import service.audit.OperationAction;
 import service.audit.OperationLogService;
 import lombok.extern.slf4j.Slf4j;
 import mapper.FleetMapper;
+import mapper.TransportOrderMapper;
 import mapper.UserMapper;
 import mapper.VehicleMapper;
 import org.springframework.stereotype.Service;
@@ -25,6 +26,7 @@ import java.util.List;
 public class FleetService {
 
     private final FleetMapper fleetMapper;
+    private final TransportOrderMapper orders;
     private final UserMapper userMapper;
     private final VehicleMapper vehicleMapper;
     private final OperationLogService audit;
@@ -85,8 +87,9 @@ public class FleetService {
         lockExistingFleet(id);
         int vehicleCount = vehicleMapper.countByFleetId(id);
         long driverCount = userMapper.countDrivers(id, null);
-        if (vehicleCount > 0 || driverCount > 0) {
-            throw new FleetInUseException(vehicleCount, driverCount);
+        long orderCount = orders.count(id, null, null);
+        if (vehicleCount > 0 || driverCount > 0 || orderCount > 0) {
+            throw new FleetInUseException(vehicleCount, driverCount, orderCount);
         }
         fleetMapper.deleteById(id);
         audit.success(OperationAction.FLEET_DELETE, id, id);
