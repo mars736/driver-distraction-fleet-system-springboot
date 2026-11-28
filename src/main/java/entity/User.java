@@ -1,7 +1,9 @@
 package entity;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
+import service.rating.DriverSafetyRating;
 
 import java.time.LocalDateTime;
 
@@ -50,4 +52,7 @@ public class User {
 
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private DriverSafetyRating.SafetyRatingView safetyRating;
 }

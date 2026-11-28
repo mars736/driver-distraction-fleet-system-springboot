@@ -18,11 +18,12 @@ import java.util.Arrays;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Component
-@ConditionalOnExpression("${alert.archive.enabled:false} || ${video.evidence.enabled:false}")
+@ConditionalOnExpression("${alert.archive.enabled:false} || ${video.evidence.enabled:false} || ${driver-safety-rating.enabled:false}")
 public class WebHdfsArchiveClient {
     private static final Duration IO_TIMEOUT = Duration.ofSeconds(8);
     private static final String REST_PREFIX = "/webhdfs/v1";
@@ -86,6 +87,38 @@ public class WebHdfsArchiveClient {
         return root + "/date=" + date + "/alert-" + alertId;
     }
 
+    public void publishRatingInput(String root, String batchId, String file, byte[] payload)
+            throws IOException, InterruptedException {
+        if (!file.matches("cutoff\\.txt|manifest\\.txt|roster\\.tsv|ready\\.ok")) {
+            throw new IllegalArgumentException("无效的评级输入文件");
+        }
+        publishFile(ratingBatch(root, batchId), file, UUID.randomUUID().toString(), payload);
+    }
+
+    public byte[] readRatingFile(String root, String batchId, String file, int maxLength)
+            throws IOException, InterruptedException {
+        if (!file.matches("outcome\\.tsv|stage[12]-job\\.txt|attempts/[a-f0-9-]{36}/scores/part-r-00000")) {
+            throw new IllegalArgumentException("无效的评级结果文件");
+        }
+        String path = ratingBatch(root, batchId) + "/" + file;
+        var status = requestToNameNode("GET", path, "GETFILESTATUS");
+        if (status.statusCode() == 404) { return null; }
+        requireStatus(status.statusCode(), 200, "GETFILESTATUS");
+        var info = json.readTree(status.body()).path("FileStatus");
+        long size = info.path("length").asLong(-1);
+        if (size < 0 || size > maxLength || !"FILE".equals(info.path("type").asText())) {
+            throw new IllegalArgumentException("评级结果文件状态或长度无效");
+        }
+        return size == 0 ? new byte[0] : readFile(path, (int) size);
+    }
+
+    private String ratingBatch(String root, String batchId) {
+        if (root == null || !root.matches("(?:/[A-Za-z0-9_-]+)+") || !batchId.matches("[a-f0-9-]{36}")) {
+            throw new IllegalArgumentException("评级批次 HDFS 路径无效");
+        }
+        return root + "/batches/" + batchId;
+    }
+
     private void publishFile(String directory, String fileName, String token, byte[] payload)
             throws IOException, InterruptedException {
         String finalPath = directory + "/" + fileName;
@@ -113,10 +146,11 @@ public class WebHdfsArchiveClient {
         var status = requestToNameNode("GET", path, "GETFILESTATUS");
         if (status.statusCode() == 404) { return false; }
         requireStatus(status.statusCode(), 200, "GETFILESTATUS");
-        if (json.readTree(status.body()).path("FileStatus").path("length").asLong(-1) != payload.length) {
-            throw new IOException("HDFS 同名归档文件长度不一致");
+        var info = json.readTree(status.body()).path("FileStatus");
+        if (!"FILE".equals(info.path("type").asText()) || info.path("length").asLong(-1) != payload.length) {
+            throw new IOException("HDFS 同名归档文件类型或长度不一致");
         }
-        if (!Arrays.equals(readFile(path, payload.length), payload)) {
+        if (payload.length > 0 && !Arrays.equals(readFile(path, payload.length), payload)) {
             throw new IOException("HDFS 同名归档文件内容不一致");
         }
         return true;
