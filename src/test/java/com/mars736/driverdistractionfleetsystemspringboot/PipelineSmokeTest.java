@@ -59,7 +59,8 @@ public class PipelineSmokeTest {
         worker.start();
         System.out.println(">>> 推理 Worker 已启动");
 
-        FfmpegManager ffmpeg = new FfmpegManager(queue, videoProps);
+        FfmpegManager ffmpeg = new FfmpegManager(queue, videoProps,
+                new video.evidence.VideoEvidenceBuffer(new video.evidence.VideoEvidenceProperties(), "./upload"));
 
         // 3. 用 FFmpeg 生成一段测试视频（10 秒、640x480、10 帧/秒）
         System.out.println(">>> 正在生成测试视频 ...");

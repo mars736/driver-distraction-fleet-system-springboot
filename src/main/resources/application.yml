@@ -20,6 +20,8 @@ infer:
 
 video:
   ffmpeg-path: ffmpeg
+  evidence:
+    enabled: ${VIDEO_EVIDENCE_ENABLED:false}
 
 alert:
   archive:

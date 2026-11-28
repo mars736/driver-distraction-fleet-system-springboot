@@ -18,6 +18,7 @@ import service.alert.rule.AlertKind;
 import service.alert.rule.AlertRuleEngine;
 import service.alert.rule.RecognitionDecisionReason;
 import service.alert.rule.VehicleAlertState;
+import service.alert.evidence.VideoEvidenceQueue;
 import service.alert.live.AlertCreatedEvent;
 import service.alert.sms.SmsChannelProperties;
 import video.FfmpegManager;
@@ -113,7 +114,11 @@ public class AlertDecisionService {
                     : kind == AlertKind.BACKLOG ? evaluation.state().getOtherEvents() : 0);
             alert.setSmsStatus(kind == AlertKind.SMS_ALERT ? "PENDING" : "NOT_REQUIRED");
             mapper.insertAlert(alert);
-            if (violation) { archive.record(alert.getId(), ArchiveEvent.Source.CREATED); }
+            if (violation) {
+                archive.record(alert.getId(), ArchiveEvent.Source.CREATED);
+                events.publishEvent(new VideoEvidenceQueue.Requested(alert.getId(), input.cameraId(),
+                        input.driverId(), input.streamId(), input.capturedAt()));
+            }
             if (kind == AlertKind.SMS_ALERT && smsProperties.getMode() == SmsChannelProperties.Mode.ALIYUN) {
                 smsDeliveries.enqueue(alert.getId(), smsProperties.getAliyun().getOutIdPrefix() + "-" + alert.getId());
             }

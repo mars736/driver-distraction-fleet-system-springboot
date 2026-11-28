@@ -2,7 +2,7 @@ package service.alert.archive;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -13,6 +13,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Map;
@@ -21,7 +22,7 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "alert.archive.enabled", havingValue = "true")
+@ConditionalOnExpression("${alert.archive.enabled:false} || ${video.evidence.enabled:false}")
 public class WebHdfsArchiveClient {
     private static final Duration IO_TIMEOUT = Duration.ofSeconds(8);
     private static final String REST_PREFIX = "/webhdfs/v1";
@@ -64,13 +65,36 @@ public class WebHdfsArchiveClient {
     public void publish(AlertArchiveQueue.Lease lease, byte[] payload) throws IOException, InterruptedException {
         var batch = lease.batch();
         String directory = baseDirectory + "/date=" + batch.partitionDate();
-        String finalPath = directory + "/batch-" + batch.id() + ".jsonl";
+        publishFile(directory, "batch-" + batch.id() + ".jsonl", lease.token(), payload);
+    }
+
+    public void publishEvidence(String root, long alertId, LocalDate date, String token, byte[] payload)
+            throws IOException, InterruptedException {
+        publishFile(evidenceDirectory(root, alertId, date), "clip.mp4", token, payload);
+    }
+
+    public byte[] readEvidence(String root, long alertId, LocalDate date, int expectedSize)
+            throws IOException, InterruptedException {
+        String path = evidenceDirectory(root, alertId, date) + "/clip.mp4";
+        return readFile(path, expectedSize);
+    }
+
+    private String evidenceDirectory(String root, long alertId, LocalDate date) {
+        if (root == null || !root.matches("(?:/[A-Za-z0-9_-]+)+") || alertId <= 0) {
+            throw new IllegalArgumentException("HDFS 视频证据目录无效");
+        }
+        return root + "/date=" + date + "/alert-" + alertId;
+    }
+
+    private void publishFile(String directory, String fileName, String token, byte[] payload)
+            throws IOException, InterruptedException {
+        String finalPath = directory + "/" + fileName;
         if (verifyIfPresent(finalPath, payload)) { return; }
         if (!booleanResult(requestToNameNode("PUT", directory, "MKDIRS&permission=750"), "MKDIRS")) {
             throw new IOException("WebHDFS 归档分区创建失败");
         }
 
-        String tempPath = directory + "/.batch-" + batch.id() + "-" + lease.token() + ".tmp";
+        String tempPath = directory + "/." + fileName + "-" + token + ".tmp";
         try {
             var location = dataNode(requestToNameNode("PUT", tempPath, "CREATE&overwrite=false&permission=640"), tempPath);
             var upload = HttpRequest.newBuilder(location).timeout(IO_TIMEOUT)
@@ -92,14 +116,21 @@ public class WebHdfsArchiveClient {
         if (json.readTree(status.body()).path("FileStatus").path("length").asLong(-1) != payload.length) {
             throw new IOException("HDFS 同名归档文件长度不一致");
         }
-        var location = dataNode(requestToNameNode("GET", path, "OPEN&length=" + (payload.length + 1)), path);
-        var read = HttpRequest.newBuilder(location).timeout(IO_TIMEOUT).GET().build();
-        var response = client.send(read, HttpResponse.BodyHandlers.ofByteArray());
-        requireStatus(response.statusCode(), 200, "OPEN");
-        if (!Arrays.equals(response.body(), payload)) {
+        if (!Arrays.equals(readFile(path, payload.length), payload)) {
             throw new IOException("HDFS 同名归档文件内容不一致");
         }
         return true;
+    }
+
+    private byte[] readFile(String path, int expectedSize) throws IOException, InterruptedException {
+        var location = dataNode(requestToNameNode("GET", path, "OPEN&length=" + (expectedSize + 1)), path);
+        var read = HttpRequest.newBuilder(location).timeout(IO_TIMEOUT).GET().build();
+        var response = client.send(read, HttpResponse.BodyHandlers.ofByteArray());
+        requireStatus(response.statusCode(), 200, "OPEN");
+        if (response.body().length != expectedSize) {
+            throw new IOException("HDFS 文件内容长度不一致");
+        }
+        return response.body();
     }
 
     private HttpResponse<byte[]> requestToNameNode(String method, String path, String query)

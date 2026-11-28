@@ -1,8 +1,10 @@
 package entity;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import service.alert.AppealStatus;
 import service.alert.AppealTargetType;
+import service.alert.evidence.VideoEvidenceView;
 import java.time.LocalDateTime;
 
 /** 一条申诉的当前状态；每次操作的详细经过另存 AppealEvent，不覆盖历史。 */
@@ -24,4 +26,6 @@ public class AppealRecord {
     private LocalDateTime reviewedAt;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private VideoEvidenceView videoEvidence;
 }

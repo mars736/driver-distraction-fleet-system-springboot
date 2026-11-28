@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.AlertVideoEvidenceMapper">
+    <sql id="evidenceColumns">
+        alert_id,camera_id,driver_id,stream_id,captured_at_ms,status,actual_start_ms,actual_end_ms,byte_size
+    </sql>
+
+    <insert id="enqueue">
+        INSERT INTO alert_video_evidence(alert_id,camera_id,driver_id,stream_id,captured_at_ms,next_attempt_ms)
+        VALUES(#{alertId},#{cameraId},#{driverId},#{streamId},#{captured},#{due})
+    </insert>
+
+    <select id="find" resultType="service.alert.evidence.AlertVideoEvidence">
+        SELECT <include refid="evidenceColumns"/> FROM alert_video_evidence WHERE alert_id=#{alertId}
+    </select>
+
+    <select id="lockDue" resultType="service.alert.evidence.AlertVideoEvidence">
+        SELECT <include refid="evidenceColumns"/> FROM alert_video_evidence
+        WHERE status='PROCESSING' AND next_attempt_ms&lt;=#{at}
+        ORDER BY next_attempt_ms,alert_id LIMIT 1 FOR UPDATE SKIP LOCKED
+    </select>
+
+    <update id="lease">
+        UPDATE alert_video_evidence SET lease_token=#{token},next_attempt_ms=#{until},attempts=attempts+1
+        WHERE alert_id=#{alertId}
+    </update>
+
+    <update id="prepared">
+        UPDATE alert_video_evidence SET actual_start_ms=#{start},actual_end_ms=#{end},byte_size=#{bytes}
+        WHERE alert_id=#{alertId} AND lease_token=#{token} AND status='PROCESSING'
+    </update>
+
+    <update id="finish">
+        UPDATE alert_video_evidence SET status=#{status},lease_token=NULL,last_error=#{error}
+        WHERE alert_id=#{alertId} AND lease_token=#{token} AND status='PROCESSING'
+    </update>
+
+    <update id="retry">
+        UPDATE alert_video_evidence SET lease_token=NULL,next_attempt_ms=#{due},last_error=#{error}
+        WHERE alert_id=#{alertId} AND lease_token=#{token} AND status='PROCESSING'
+    </update>
+</mapper>

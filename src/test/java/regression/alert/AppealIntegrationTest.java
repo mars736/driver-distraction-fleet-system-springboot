@@ -104,6 +104,20 @@ class AppealIntegrationTest {
         assertThat(time).isBetween(LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(1), LocalDateTime.now(ZoneId.of("Asia/Shanghai")).plusSeconds(1));
     }
 
+    @Test void historicalAlertsStillShowFallbackAndVideoIsRestrictedToAdministrators() throws Exception {
+        long id = create("ALERT", openAlert, driverToken);
+        String path = "/api/appeals/" + id;
+        mvc.perform(get(path).header("Authorization", adminToken))
+                .andExpect(jsonPath("$.data.videoEvidence.status").value("UNAVAILABLE"))
+                .andExpect(jsonPath("$.data.videoEvidence.playbackUrl").isEmpty());
+        mvc.perform(get(path).header("Authorization", driverToken))
+                .andExpect(jsonPath("$.data.videoEvidence").doesNotExist());
+        mvc.perform(get(path + "/evidence-video").header("Authorization", adminToken))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value(404));
+        mvc.perform(head(path + "/evidence-video").header("Authorization", driverToken))
+                .andExpect(status().isForbidden());
+    }
+
     @Test void confirmedAlertCanBeRevokedAtomicallyWithoutChangingRecognitionOrSms() throws Exception {
         long rec = jdbc.queryForObject("SELECT recognition_id FROM alert_record WHERE id=?", Long.class, confirmedAlert);
         var before = jdbc.queryForMap("SELECT * FROM recognition_record WHERE id=?", rec);

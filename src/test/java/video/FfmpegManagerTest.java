@@ -27,7 +27,7 @@ class FfmpegManagerTest {
     @BeforeEach
     void setUp() {
         properties = new VideoCaptureProperties();
-        manager = spy(new FfmpegManager(mock(InferFrameQueue.class), properties));
+        manager = spy(new FfmpegManager(mock(InferFrameQueue.class), properties, mock(video.evidence.VideoEvidenceBuffer.class)));
         camera = new Camera();
         camera.setId(7L);
         camera.setStreamUrl("test-stream");
