@@ -175,6 +175,11 @@ class OpenApiExportTest {
             binary(paths, path, "image/jpeg");
         }
         binary(paths, "/api/appeals/{id}/materials/{materialId}", "image/jpeg", "image/png", "application/pdf");
+        binary(paths, "/api/appeals/{id}/evidence-video", "video/mp4");
+        responses(paths, "/api/appeals/{id}/evidence-video", "get", "404", "申诉不存在或没有可播放的视频");
+        responses(paths, "/api/appeals/{id}/evidence-video", "get", "503", "HDFS 视频暂时无法读取");
+        detail(paths, "/api/appeals/{id}/evidence-video", "get",
+                "仅平台管理员可读。将完整 MP4 作为 Blob 播放，使用现有 Bearer JWT。");
         binary(paths, "/api/report-jobs/{id}/file", "application/pdf",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
         binary(paths, "/api/alerts/export", "text/csv");

@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -25,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongFunction;
 import java.util.function.Supplier;
+import video.evidence.VideoEvidenceBuffer;
 
 @Slf4j
 @Component
@@ -38,6 +40,7 @@ public class FfmpegManager {
 
     private final InferFrameQueue frameQueue;
     private final VideoCaptureProperties props;
+    private final VideoEvidenceBuffer evidence;
     private final Map<Long, Capture> captures = new HashMap<>();
     private final Map<Long, Process> terminating = new HashMap<>();
     private final LinkedHashMap<Long, Preview> previews = new LinkedHashMap<>();
@@ -168,10 +171,21 @@ public class FfmpegManager {
                 scheduleRetry(capture);
                 return;
             }
-            Process process = startProcess(capture.camera);
+            String streamId = (capture.policy == null ? "" : MANAGED_PREFIX) + UUID.randomUUID();
+            Path recording = null;
+            if (capture.policy != null) {
+                try { recording = evidence.open(streamId); }
+                catch (IOException exception) { log.warn("录像缓存不可用，cameraId={}", id); }
+            }
+            Process process;
+            try {
+                process = recording == null ? startProcess(capture.camera) : startProcess(capture.camera, recording);
+            } catch (IOException | RuntimeException exception) {
+                evidence.close(streamId);
+                throw exception;
+            }
             capture.process = process;
             capture.lastFrameAt = System.nanoTime();
-            String streamId = (capture.policy == null ? "" : MANAGED_PREFIX) + UUID.randomUUID();
             capture.streamId = streamId;
             capture.receivedFrame = false;
             Thread reader = new Thread(() -> readFrames(capture, process, streamId), "ffmpeg-" + id);
@@ -188,6 +202,7 @@ public class FfmpegManager {
     private void retire(long id, Capture capture) {
         Process process = capture.process;
         capture.process = null;
+        if (capture.streamId != null) { evidence.close(capture.streamId); }
         capture.streamId = null;
         removePreviews(id);
         if (process == null) { return; }
@@ -215,14 +230,29 @@ public class FfmpegManager {
     }
 
     Process startProcess(Camera camera) throws IOException {
+        return startProcess(camera, null);
+    }
+
+    Process startProcess(Camera camera, Path recording) throws IOException {
         var args = new ArrayList<>(List.of(
                 props.getFfmpegPath(), "-fflags", "nobuffer", "-flags", "low_delay"));
         if (camera.getVehicleId() != null) {
             args.addAll(List.of("-protocol_whitelist", "rtsp,rtp,tcp,udp,http,https,tls,crypto"));
         }
-        args.addAll(List.of("-i", camera.getStreamUrl(), "-vf", "fps=" + (1.0 / sampleInterval(camera)),
-                "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "2", "-"));
+        args.addAll(List.of("-i", camera.getStreamUrl(), "-map", "0:v:0", "-vf",
+                "fps=" + (1.0 / sampleInterval(camera)), "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "2", "-"));
+        if (recording != null) {
+            args.addAll(List.of("-map", "0:v:0", "-c:v", "copy", "-an", "-f", "hls", "-hls_time", "2",
+                    "-hls_list_size", "45", "-hls_flags",
+                    "program_date_time+temp_file+delete_segments+omit_endlist",
+                    "-ignore_io_errors", "1", "-hls_segment_filename", "part-%06d.ts", "index.m3u8"));
+            Path executable = Path.of(props.getFfmpegPath());
+            if (!executable.isAbsolute() && executable.getNameCount() > 1) {
+                args.set(0, executable.toAbsolutePath().toString());
+            }
+        }
         var builder = new ProcessBuilder(args);
+        if (recording != null) { builder.directory(recording.toFile()); }
         return builder.redirectError(ProcessBuilder.Redirect.DISCARD).start();
     }
 
@@ -279,6 +309,7 @@ public class FfmpegManager {
             capture.delayMs = 0;
             long frameId = frameIds.incrementAndGet();
             if (capture.policy != null) {
+                evidence.sample(streamId, driver, capturedAt);
                 retainPreview(new Preview(camera.getId(), streamId, frameId, capturedAt, jpeg));
             }
             frameQueue.offer(new InferFrame(frameId, camera.getId(), camera.getVehicleId(),

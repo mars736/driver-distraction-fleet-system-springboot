@@ -37,4 +37,5 @@ smoke_test_input.mp4
 
 ### Runtime artifacts ###
 /upload/
+/var/
 __pycache__/

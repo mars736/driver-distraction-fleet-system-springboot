@@ -8876,6 +8876,85 @@
         }
       }
     },
+    "/api/appeals/{id}/evidence-video" : {
+      "get" : {
+        "tags" : [ "appeal-controller" ],
+        "operationId" : "evidenceVideo",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "video/mp4" : {
+                "schema" : {
+                  "type" : "string",
+                  "format" : "binary"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "未登录或令牌失效",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "权限不足",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "业务或请求错误，使用 code、message、data 响应",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "申诉不存在或没有可播放的视频",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "503" : {
+            "description" : "HDFS 视频暂时无法读取",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          }
+        },
+        "description" : "仅平台管理员可读。将完整 MP4 作为 Blob 播放，使用现有 Bearer JWT。"
+      }
+    },
     "/api/appeals/{id}/events" : {
       "get" : {
         "tags" : [ "appeal-controller" ],
@@ -11487,6 +11566,9 @@
           "updateTime" : {
             "type" : "string",
             "format" : "date-time"
+          },
+          "videoEvidence" : {
+            "$ref" : "#/components/schemas/VideoEvidenceView"
           }
         }
       },
@@ -11502,6 +11584,26 @@
           },
           "data" : {
             "$ref" : "#/components/schemas/AppealRecord"
+          }
+        }
+      },
+      "VideoEvidenceView" : {
+        "type" : "object",
+        "properties" : {
+          "status" : {
+            "type" : "string",
+            "enum" : [ "PROCESSING", "READY", "PARTIAL", "UNAVAILABLE" ]
+          },
+          "actualStartAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "actualEndAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "playbackUrl" : {
+            "type" : "string"
           }
         }
       },
