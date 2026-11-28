@@ -29,7 +29,7 @@
 
 `PUT /shifts` 示例 `{"driverId":1,"date":"2026-12-01","type":"LATE","startsAt":"2026-12-01T20:00:00","endsAt":"2026-12-02T04:00:00","expectedVersion":0}`。同一司机每天一个班次，开始日期与排班日期一致。默认早班 08:00–16:00，晚班 16:00–次日 00:00，休息 `REST` 无起止时间。自定义班次可跨午夜，最长 24 小时。北京时间今天及以后可保存，已打卡的班次保留原排班。
 
-新建传 `expectedVersion: 0`，编辑传上次读取的 `version`，成功后返回新版本。旧库既有排班从版本 1 开始，迁移前的编辑没有历史记录。历史日期与版本冲突分别返回 HTTP 409 和 `data.reason` 中的 `SHIFT_PAST_DATE`、`SHIFT_VERSION_CONFLICT`。工作班进入已登记的休息日会返回 `SHIFT_OVERLAPS_REST`，休息日覆盖已有工作班会返回 `REST_OVERLAPS_SHIFT`。时段仅在边界相接时可保存。
+新建传 `expectedVersion: 0`，编辑传上次读取的 `version`，成功后返回新版本。旧库既有排班从版本 1 开始，迁移前的编辑没有历史记录。历史日期与版本冲突分别返回 HTTP 409 和 `data.reason` 中的 `SHIFT_PAST_DATE`、`SHIFT_VERSION_CONFLICT`。工作班进入已登记的休息日会返回 `SHIFT_OVERLAPS_REST`，休息日覆盖已有工作班会返回 `REST_OVERLAPS_SHIFT`。两个工作班重叠会返回 `SHIFT_OVERLAPS_SHIFT`。时段仅在边界相接时可保存。
 
 签到、签退示例 `{"shiftDate":"2026-11-22","position":{"latitude":24.48,"longitude":118.08}}`。可提前两小时签到，出勤统计以排班日期归属打卡，迟到和早退按排班起止时间判断。当前班有效、已签到且未签退，并且当前没有休息安排、获批请假或执行中任务时，运营车队的司机可进入派单候选。
 

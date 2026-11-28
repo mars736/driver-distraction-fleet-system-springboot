@@ -1,6 +1,7 @@
 package regression;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.mars736.driverdistractionfleetsystemspringboot.DriverDistractionFleetSystemSpringbootApplication;
 import common.util.JwtUtil;
@@ -18,7 +19,9 @@ import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Base64;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -52,6 +55,17 @@ class OpenApiExportTest {
         enhance(spec);
         assertThat(spec.path("paths").size()).isGreaterThan(50);
         assertThat(spec.at("/components/schemas/ShiftRequest/properties/expectedVersion").isObject()).isTrue();
+        var shifts = spec.path("paths").path("/api/operations/workforce/shifts").path("put");
+        var shiftExamples = shifts.at("/requestBody/content/application~1json/examples");
+        assertThat(shiftExamples.at("/create/value/expectedVersion").asLong(-1)).isZero();
+        assertThat(shiftExamples.at("/update/value/expectedVersion").asLong(-1)).isEqualTo(1);
+        assertThat(shifts.at("/responses/409/content/application~1json/examples/SHIFT_OVERLAPS_REST/value/data/reason")
+                .asText()).isEqualTo("SHIFT_OVERLAPS_REST");
+        assertThat(shifts.at("/responses/409/content/application~1json/examples/REST_OVERLAPS_SHIFT/value/data/reason")
+                .asText()).isEqualTo("REST_OVERLAPS_SHIFT");
+        assertThat(spec.path("paths").path("/api/drivers").path("post")
+                .at("/responses/409/content/application~1json/examples/EMPLOYEE_NO_CONFLICT/value/data/field")
+                .asText()).isEqualTo("employeeNo");
         assertThat(spec.at("/paths/~1api~1vehicles~1{id}~1track/get/parameters").toString()).contains("snapshotId");
         assertThat(spec.at("/paths/~1api~1alerts~1{id}~1key-frame/get/responses/200/content/image~1jpeg/schema/format")
                 .asText()).isEqualTo("binary");
@@ -104,10 +118,11 @@ class OpenApiExportTest {
             }
             errorResponse(responses, "default", "业务或请求错误，使用 code、message、data 响应");
         }));
-        responses(paths, "/api/operations/workforce/shifts", "put", "409",
-                "SHIFT_PAST_DATE / SHIFT_VERSION_CONFLICT / SHIFT_OVERLAPS_REST / REST_OVERLAPS_SHIFT / REST_OVERLAPS_TASK / SHIFT_OVERLAPS_LEAVE");
-        responses(paths, "/api/drivers", "post", "409", "EMPLOYEE_NO_CONFLICT，data.field 为 employeeNo");
-        responses(paths, "/api/drivers/{id}", "put", "409", "EMPLOYEE_NO_CONFLICT，data.field 为 employeeNo");
+        shiftContract((ObjectNode) paths.path("/api/operations/workforce/shifts").path("put"));
+        var employeeNoConflict = conflict("工号与已有登录名或工号重复",
+                Map.of("EMPLOYEE_NO_CONFLICT", "工号已被用作现有账号的登录名或工号"), "employeeNo");
+        ((ObjectNode) paths.path("/api/drivers").path("post").path("responses")).set("409", employeeNoConflict);
+        ((ObjectNode) paths.path("/api/drivers/{id}").path("put").path("responses")).set("409", employeeNoConflict.deepCopy());
         var reportCreate = (ObjectNode) paths.path("/api/report-jobs").path("post").path("responses");
         var accepted = (ObjectNode) reportCreate.remove("200");
         reportCreate.set("202", accepted.put("description", "报表任务已受理"));
@@ -148,6 +163,63 @@ class OpenApiExportTest {
         streamHead.putObject("405").put("description", "仅支持 GET 订阅").putObject("headers")
                 .putObject("Allow").putObject("schema").put("type", "string").put("example", "GET");
         responses(paths, "/api/alerts/stream", "get", "429", "订阅连接超过服务端限制，请退避重试");
+    }
+
+    private static void shiftContract(ObjectNode operation) {
+        var media = (ObjectNode) operation.path("requestBody").path("content").path("application/json");
+        var examples = media.putObject("examples");
+        shiftExample(examples, "create", "首次排班", 0, "2030-12-01T20:00:00", "2030-12-02T04:00:00");
+        shiftExample(examples, "update", "编辑当前版本为 1 的班次", 1,
+                "2030-12-01T20:00:00", "2030-12-02T00:00:00");
+        var shiftConflict = conflict("排班与当前版本、日期或业务安排冲突，或班次已有打卡记录",
+                Map.of(
+                        "SHIFT_PAST_DATE", "历史排班不可修改或补录",
+                        "SHIFT_VERSION_CONFLICT", "排班已被修改，请刷新",
+                        "SHIFT_OVERLAPS_REST", "工作班次与休息日重叠",
+                        "REST_OVERLAPS_SHIFT", "休息日与跨夜工作班次重叠",
+                        "SHIFT_OVERLAPS_SHIFT", "班次与相邻日期的排班重叠",
+                        "REST_OVERLAPS_TASK", "休息日与未完成的运输任务重叠",
+                        "SHIFT_OVERLAPS_LEAVE", "工作班次与已批准请假重叠"), null);
+        var conflictMedia = shiftConflict.withObjectProperty("content").withObjectProperty("application/json");
+        ((ObjectNode) conflictMedia.at("/schema/properties/data")).put("nullable", true);
+        conflictMedia.withObjectProperty("examples").putObject("attendanceExists")
+                .put("summary", "班次已有打卡记录").putObject("value").put("code", 409)
+                .put("message", "已有打卡记录的班次不能修改").putNull("data");
+        operation.withObjectProperty("responses").set("409", shiftConflict);
+    }
+
+    private static void shiftExample(ObjectNode examples, String name, String summary, long version,
+                                     String startsAt, String endsAt) {
+        examples.putObject(name).put("summary", summary).putObject("value")
+                .put("driverId", 1).put("date", startsAt.substring(0, 10)).put("type", "LATE")
+                .put("startsAt", startsAt).put("endsAt", endsAt).put("expectedVersion", version);
+    }
+
+    private static ObjectNode conflict(String description, Map<String, String> reasons, String field) {
+        var response = JsonNodeFactory.instance.objectNode();
+        var media = response.put("description", description).putObject("content").putObject("application/json");
+        var schema = media.putObject("schema").put("type", "object");
+        schema.putArray("required").add("code").add("message").add("data");
+        var properties = schema.putObject("properties");
+        properties.putObject("code").put("type", "integer").putArray("enum").add(409);
+        properties.putObject("message").put("type", "string");
+        var data = properties.putObject("data").put("type", "object");
+        var required = data.putArray("required").add("reason");
+        var dataProperties = data.putObject("properties");
+        var reasonValues = dataProperties.putObject("reason").put("type", "string").putArray("enum");
+        if (field != null) {
+            required.add("field");
+            dataProperties.putObject("field").put("type", "string").putArray("enum").add(field);
+        }
+
+        var examples = media.putObject("examples");
+        new TreeMap<>(reasons).forEach((reason, message) -> {
+            reasonValues.add(reason);
+            var details = examples.putObject(reason).put("summary", message).putObject("value")
+                    .put("code", 409).put("message", message).putObject("data").put("reason", reason);
+            if (field != null) { details.put("field", field); }
+        });
+        return response;
     }
 
     private static void coordinateSystems(ObjectNode schemas, String name, boolean nullable, String... values) {

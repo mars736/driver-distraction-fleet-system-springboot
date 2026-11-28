@@ -50,7 +50,6 @@ public class WorkforceService {
         LocalDate date = input.date();
         check(date.getYear() >= 1000 && date.getYear() <= 9998, 400, "排班日期无效");
         var at = now();
-        require(!date.isBefore(at.toLocalDate()), HISTORICAL_SHIFT_READ_ONLY);
         require(!date.isBefore(at.toLocalDate()), SHIFT_PAST_DATE);
         var before = mapper.shift(driver.getId(), date);
         require(input.expectedVersion() == (before == null ? 0L : before.version()), SHIFT_VERSION_CONFLICT);
@@ -62,10 +61,8 @@ public class WorkforceService {
             check(start == null && end == null, 400, "休息班次不填写起止时间");
             var restStart = date.atStartOfDay();
             var restEnd = restStart.plusDays(1);
-            require(!mapper.shiftOverlap(driver.getId(), date, restStart, restEnd), SHIFT_OVERLAPS_SHIFT);
+            require(!mapper.shiftOverlap(driver.getId(), date, restStart, restEnd), REST_OVERLAPS_SHIFT);
             require(!mapper.taskConflict(driver.getId(), null, restStart, restEnd, at),
-            require(!mapper.shiftOverlap(driver.getId(), date, restStart, restStart.plusDays(1)), REST_OVERLAPS_SHIFT);
-            require(!mapper.taskConflict(driver.getId(), null, restStart, restStart.plusDays(1), at),
                     REST_OVERLAPS_TASK);
         } else {
             if (start == null && end == null) {
@@ -74,9 +71,8 @@ public class WorkforceService {
             }
             window(start, end, 1);
             check(start.toLocalDate().equals(date), 400, "班次开始时间应在排班当天");
-            require(!mapper.shiftOverlap(driver.getId(), date, start, end), SHIFT_OVERLAPS_SHIFT);
-            check(!mapper.shiftOverlap(driver.getId(), date, start, end), 409, "班次与相邻日期的排班重叠");
             require(!mapper.restOverlapExcept(driver.getId(), date, start, end), SHIFT_OVERLAPS_REST);
+            require(!mapper.shiftOverlap(driver.getId(), date, start, end), SHIFT_OVERLAPS_SHIFT);
             require(!mapper.leaveOverlap(driver.getId(), 0, start, end), SHIFT_OVERLAPS_LEAVE);
         }
         if (before == null) {
