@@ -295,10 +295,12 @@ class VehicleTelemetryIntegrationTest {
 
     @Test
     void trackSnapshotExcludesLateSamplesAndKeepsCoordinateSource() throws Exception {
+        report(driver, sampledAt - 1000, "2").andExpect(status().isOk());
         report(driver, sampledAt, "2").andExpect(status().isOk());
         long begin = sampledAt - 10_000;
-        var first = mvc.perform(track(begin, sampledAt + 1))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalPoints").value(1))
+        var first = mvc.perform(track(begin, sampledAt + 1).param("pageSize", "1"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalPoints").value(2))
+                .andExpect(jsonPath("$.data.points[0].sampledAt").value(sampledAt - 1000))
                 .andExpect(jsonPath("$.data.points[0].coordinateSystem").value("GCJ-02"))
                 .andReturn().getResponse();
         long snapshot = json.readTree(first.getContentAsByteArray()).path("data").path("snapshotId").asLong();
@@ -306,12 +308,17 @@ class VehicleTelemetryIntegrationTest {
         report(driver, sampledAt - 3000, "2").andExpect(status().isOk());
         jdbc.update("INSERT INTO vehicle_telemetry(vehicle_id,driver_id,sampled_at,latitude,longitude) VALUES(?,?,?,24.48,118.08)",
                 vehicle, driver, sampledAt - 2000);
-        mvc.perform(track(begin, sampledAt + 1).param("snapshotId", Long.toString(snapshot)).param("page", "2"))
-                .andExpect(jsonPath("$.data.totalPoints").value(1))
-                .andExpect(jsonPath("$.data.snapshotId").value(snapshot));
+        mvc.perform(track(begin, sampledAt + 1).param("snapshotId", Long.toString(snapshot))
+                        .param("page", "2").param("pageSize", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalPoints").value(2))
+                .andExpect(jsonPath("$.data.snapshotId").value(snapshot))
+                .andExpect(jsonPath("$.data.points[0].sampledAt").value(sampledAt));
         mvc.perform(track(begin, sampledAt + 1))
-                .andExpect(jsonPath("$.data.totalPoints").value(3))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalPoints").value(4))
                 .andExpect(jsonPath("$.data.coordinateSystem").value("MIXED"))
+                .andExpect(jsonPath("$.data.points[0].sampledAt").value(sampledAt - 3000))
                 .andExpect(jsonPath("$.data.points[1].coordinateSystem").value("UNKNOWN"));
         mvc.perform(liveStatus()).andExpect(jsonPath("$.data.list[0].coordinateSystem").value("GCJ-02"));
     }
