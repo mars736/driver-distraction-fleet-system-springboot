@@ -38,6 +38,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    - `src/main/resources/db/migrations/20261128_alert_video_evidence.sql`
    - `src/main/resources/db/migrations/20261128_driver_safety_rating.sql`
    - `src/main/resources/db/migrations/20261128_transport_dispatch_rating.sql`
+   - `src/main/resources/db/migrations/20261128_dify_agent.sql`（启用 Dify 管理助手时）
 
    执行运输订单迁移前，旧库可用以下查询找出缺少关联档案的数据。若有结果，先核对并修复归属，再执行迁移。
 

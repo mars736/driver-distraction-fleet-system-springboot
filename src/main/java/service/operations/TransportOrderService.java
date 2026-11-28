@@ -43,6 +43,14 @@ public class TransportOrderService {
     @Value("${transport-orders.high-minimum-rating:A}")
     private Level highMinimumRating;
 
+    @Transactional(readOnly = true)
+    public Draft preview(Draft input) {
+        admin();
+        var draft = normalize(input, now());
+        check(fleets.selectById(draft.fleetId()) != null, 404, "车队不存在");
+        return draft;
+    }
+
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public OrderRow create(Draft input) {
         long actor = admin().userId();

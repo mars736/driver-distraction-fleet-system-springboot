@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.DifyAgentMapper">
+    <select id="fleets" resultType="dto.operations.DifyAgent$FleetOption">
+        SELECT id, fleet_no, name FROM fleet WHERE enabled=1 ORDER BY id LIMIT #{limit} OFFSET #{offset}
+    </select>
+    <select id="drivers" resultType="dto.operations.DifyAgent$DriverOption">
+        SELECT u.id, u.fleet_id, u.employee_no, u.name FROM sys_user u
+        JOIN fleet f ON f.id=u.fleet_id AND f.enabled=1
+        WHERE u.role='DRIVER' AND u.enabled=1
+        <if test="fleetId != null">AND u.fleet_id=#{fleetId}</if>
+        ORDER BY u.id LIMIT #{limit} OFFSET #{offset}
+    </select>
+    <select id="driverLabels" resultType="dto.operations.DifyAgent$DriverLabel">
+        SELECT id, name FROM sys_user WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </select>
+    <insert id="saveDraft">
+        INSERT INTO dify_agent_draft(id, actor_id, action, payload, expires_at)
+        VALUES(#{id}, #{actorId}, #{action}, #{payload}, #{expiresAt})
+    </insert>
+    <select id="lockDraft" resultType="dto.operations.DifyAgent$DraftRow">
+        SELECT id, actor_id, action, payload, expires_at, result FROM dify_agent_draft
+        WHERE id=#{id} AND actor_id=#{actorId} FOR UPDATE
+    </select>
+    <update id="completeDraft">
+        UPDATE dify_agent_draft SET result=#{result}, payload=NULL WHERE id=#{id} AND result IS NULL
+    </update>
+    <delete id="purgeOldDrafts">
+        DELETE FROM dify_agent_draft WHERE expires_at&lt;#{before} LIMIT 100
+    </delete>
+    <sql id="archiveScope">
+        o.captured_at&gt;=#{start} AND o.captured_at&lt;#{end} AND o.driver_id IS NOT NULL
+        <if test="fleetId != null">AND o.fleet_id=#{fleetId}</if>
+        <if test="driverId != null">AND o.driver_id=#{driverId}</if>
+    </sql>
+    <select id="archiveFiles" resultType="dto.operations.DifyAgent$ArchiveFile">
+        SELECT DISTINCT b.id, b.partition_date, b.synced_at
+        FROM alert_archive_outbox o
+        JOIN alert_archive_batch b ON b.id=o.batch_id AND b.synced_at IS NOT NULL
+        WHERE <include refid="archiveScope"/>
+        ORDER BY b.synced_at, b.id LIMIT #{limit}
+    </select>
+    <select id="archiveCoverage" resultType="dto.operations.DifyAgent$ArchiveCoverage">
+        SELECT (SELECT MAX(synced_at) FROM alert_archive_batch) AS latest_batch_synced_at,
+               (SELECT COUNT(*) FROM alert_archive_outbox o LEFT JOIN alert_archive_batch b ON b.id=o.batch_id
+                WHERE <include refid="archiveScope"/> AND b.synced_at IS NULL) AS pending_events,
+               EXISTS(SELECT 1 FROM alert_archive_backfill WHERE id=1 AND last_id&gt;=through_id) AS backfill_complete
+    </select>
+</mapper>

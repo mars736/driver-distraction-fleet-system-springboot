@@ -69,6 +69,21 @@ public class WebHdfsArchiveClient {
         publishFile(directory, "batch-" + batch.id() + ".jsonl", lease.token(), payload);
     }
 
+    public byte[] readAlertBatch(String id, LocalDate date) throws IOException, InterruptedException {
+        if (!id.matches("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")) {
+            throw new IllegalArgumentException("无效的告警归档批次");
+        }
+        String path = baseDirectory + "/date=" + date + "/batch-" + id + ".jsonl";
+        var status = requestToNameNode("GET", path, "GETFILESTATUS");
+        requireStatus(status.statusCode(), 200, "GETFILESTATUS");
+        var info = json.readTree(status.body()).path("FileStatus");
+        long size = info.path("length").asLong(-1);
+        if (size < 1 || size > 1024 * 1024 || !"FILE".equals(info.path("type").asText())) {
+            throw new IOException("告警归档文件状态或长度无效");
+        }
+        return readFile(path, (int) size);
+    }
+
     public void publishEvidence(String root, long alertId, LocalDate date, String token, byte[] payload)
             throws IOException, InterruptedException {
         publishFile(evidenceDirectory(root, alertId, date), "clip.mp4", token, payload);

@@ -6,6 +6,7 @@ import controller.alert.AlertLiveController;
 import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -34,6 +35,14 @@ public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
     private final SecurityResponseWriter securityResponseWriter;
+
+    @Bean
+    public FilterRegistrationBean<JwtAuthFilter> jwtServletRegistration(JwtAuthFilter filter) {
+        // JWT 仅在明确加入它的安全链运行，服务凭据由相应的链校验。
+        var registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
 
     @Bean
     public PasswordEncoder passwordEncoder() {

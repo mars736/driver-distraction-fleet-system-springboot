@@ -24,6 +24,11 @@ driver-safety-rating:
 transport-orders:
   high-minimum-rating: ${TRANSPORT_ORDER_HIGH_MINIMUM_RATING:A}
 
+dify-agent:
+  enabled: ${DIFY_AGENT_ENABLED:false}
+  api-key: ${DIFY_AGENT_API_KEY:}
+  actor-id: ${DIFY_AGENT_ACTOR_ID:0}
+
 video:
   ffmpeg-path: ffmpeg
   evidence:
