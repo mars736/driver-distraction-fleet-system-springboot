@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.AlertArchiveMapper">
+    <sql id="archiveable">record_type IN ('SMS_ALERT','BACKLOG')</sql>
+
+    <update id="advanceRevision">
+        UPDATE alert_record SET archive_revision=archive_revision+1
+        WHERE id=#{alertId} AND <include refid="archiveable"/>
+    </update>
+
+    <sql id="eventColumns">
+        alert_id,revision,recognition_id,driver_id,vehicle_id,fleet_id,camera_id,captured_at,
+        record_type,behavior_code,status,source,recorded_at
+    </sql>
+
+    <sql id="alertSnapshot">
+        id,archive_revision,recognition_id,driver_id,vehicle_id,fleet_id,camera_id,captured_at,
+        record_type,behavior_code,status
+    </sql>
+
+    <insert id="insertEvent">
+        INSERT INTO alert_archive_outbox(<include refid="eventColumns"/>)
+        SELECT <include refid="alertSnapshot"/>,#{source},#{at} FROM alert_record WHERE id=#{alertId}
+    </insert>
+
+    <insert id="initializeBackfill">
+        INSERT INTO alert_archive_backfill(id,through_id) SELECT 1,COALESCE(MAX(id),0) FROM alert_record
+        ON DUPLICATE KEY UPDATE through_id=alert_archive_backfill.through_id
+    </insert>
+
+    <select id="lockBackfill" resultType="mapper.AlertArchiveMapper$Backfill">
+        SELECT through_id,last_id FROM alert_archive_backfill WHERE id=1 FOR UPDATE
+    </select>
+
+    <select id="backfillIds" resultType="long">
+        SELECT id FROM alert_record WHERE id&gt;#{last} AND id&lt;=#{through}
+        ORDER BY id LIMIT #{size}
+    </select>
+
+    <insert id="backfillEvents">
+        INSERT INTO alert_archive_outbox(<include refid="eventColumns"/>)
+        SELECT <include refid="alertSnapshot"/>,'BACKFILL',#{at} FROM alert_record
+        WHERE id&gt;#{last} AND id&lt;=#{through} AND archive_revision=0 AND <include refid="archiveable"/>
+        ON DUPLICATE KEY UPDATE revision=alert_archive_outbox.revision
+    </insert>
+
+    <update id="advanceBackfill">
+        UPDATE alert_archive_backfill SET last_id=#{last} WHERE id=1
+    </update>
+
+    <select id="lockDueBatch" resultType="mapper.AlertArchiveMapper$Batch">
+        SELECT id,partition_date FROM alert_archive_batch
+        WHERE synced_at IS NULL AND next_attempt_at&lt;=#{at} AND (lease_until IS NULL OR lease_until&lt;=#{at})
+        ORDER BY next_attempt_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
+    </select>
+
+    <select id="lockUnassignedEvents" resultType="long">
+        SELECT id FROM alert_archive_outbox WHERE batch_id IS NULL ORDER BY id LIMIT #{size}
+        FOR UPDATE SKIP LOCKED
+    </select>
+
+    <insert id="insertBatch">
+        INSERT INTO alert_archive_batch(id,partition_date,next_attempt_at) VALUES(#{batch.id},#{batch.partitionDate},#{at})
+    </insert>
+
+    <update id="attachEvents">
+        UPDATE alert_archive_outbox SET batch_id=#{id} WHERE batch_id IS NULL AND id IN
+        <foreach collection="events" item="eventId" open="(" separator="," close=")">#{eventId}</foreach>
+    </update>
+
+    <update id="leaseBatch">
+        UPDATE alert_archive_batch SET lease_token=#{token},lease_until=#{until},attempts=attempts+1 WHERE id=#{id}
+    </update>
+
+    <select id="events" resultType="service.alert.archive.ArchiveEvent">
+        SELECT <include refid="eventColumns"/> FROM alert_archive_outbox WHERE batch_id=#{id} ORDER BY id
+    </select>
+
+    <update id="complete">
+        UPDATE alert_archive_batch SET synced_at=#{at},lease_token=NULL,lease_until=NULL,last_error=NULL
+        WHERE id=#{id} AND lease_token=#{token} AND synced_at IS NULL
+    </update>
+
+    <update id="retry">
+        UPDATE alert_archive_batch SET next_attempt_at=#{at},lease_token=NULL,lease_until=NULL,last_error=#{error}
+        WHERE id=#{id} AND lease_token=#{token} AND synced_at IS NULL
+    </update>
+</mapper>

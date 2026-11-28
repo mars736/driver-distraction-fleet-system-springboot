@@ -35,6 +35,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import service.alert.*;
+import service.alert.archive.AlertArchiveQueue;
 import service.alert.rule.AlertRuleEngine;
 import service.alert.rule.VehicleAlertState;
 import service.alert.sms.SmsChannelProperties;
@@ -84,6 +85,7 @@ class AlertPersistenceIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired JwtUtil jwt;
     @Autowired AlertDecisionService service;
+    @Autowired AlertArchiveQueue archive;
     @Autowired SmsDispatcher dispatcher;
     @Autowired AlertDecisionMapper mapper;
     @Autowired SmsDeliveryMapper deliveries;
@@ -307,7 +309,7 @@ class AlertPersistenceIntegrationTest {
         realProperties.setMode(SmsChannelProperties.Mode.ALIYUN);
         realProperties.getAliyun().setOutIdPrefix("integration");
         AlertDecisionService realMode = new AlertDecisionService(mapper, vehicles, speed, engine, json, keyFrames,
-                new AlertTimelineCapture(timelineMapper, keyFrames), event -> {}, deliveries, realProperties, cameras, ffmpeg);
+                new AlertTimelineCapture(timelineMapper, keyFrames), event -> {}, deliveries, realProperties, cameras, ffmpeg, archive);
         var transaction = new TransactionTemplate(transactions);
         CapturedInference last = null;
         for (int i = 0; i < 5; i++) {
@@ -362,7 +364,7 @@ class AlertPersistenceIntegrationTest {
         for (int i = 0; i < 4; i++) { service.process(input(1, false), false); }
         AlertDecisionService restarted = new AlertDecisionService(mapper, vehicles, speed, engine, json, keyFrames,
                 new AlertTimelineCapture(timelineMapper, keyFrames), event -> {},
-                deliveries, smsProperties, cameras, ffmpeg);
+                deliveries, smsProperties, cameras, ffmpeg, archive);
         CapturedInference fifth = input(3, false);
         List<AlertRecord> alerts = new TransactionTemplate(transactions).execute(status -> {
             try { return restarted.process(fifth, false); }

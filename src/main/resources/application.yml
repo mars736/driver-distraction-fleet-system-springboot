@@ -21,6 +21,10 @@ infer:
 video:
   ffmpeg-path: ffmpeg
 
+alert:
+  archive:
+    enabled: ${ALERT_ARCHIVE_ENABLED:false}
+
 sms:
   mode: ${FLEET_SMS_MODE:simulated}
   aliyun:

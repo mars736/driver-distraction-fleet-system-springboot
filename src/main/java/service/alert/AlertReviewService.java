@@ -13,6 +13,8 @@ import mapper.AppealMapper;
 import mapper.UserMapper;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import service.alert.archive.AlertArchiveQueue;
+import service.alert.archive.ArchiveEvent;
 import service.alert.live.AlertRevokedEvent;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
@@ -29,6 +31,7 @@ public class AlertReviewService {
     private final AppealMapper appealMapper;
     private final OperationLogService audit;
     private final ApplicationEventPublisher events;
+    private final AlertArchiveQueue archive;
 
     @Transactional
     public AlertReviewRecord review(long id, AlertReviewRequest request) {
@@ -66,6 +69,7 @@ public class AlertReviewService {
             throw new AlertReviewConflict(AlertReviewConflict.Reason.ALREADY_REVIEWED,
                     null, "告警状态已变更，请刷新后查看结果");
         }
+        archive.record(id, ArchiveEvent.Source.DIRECT_REVIEW);
         var record = new AlertReviewRecord();
         record.setAlertId(id);
         record.setFromStatus(AlertStatus.OPEN.name());
