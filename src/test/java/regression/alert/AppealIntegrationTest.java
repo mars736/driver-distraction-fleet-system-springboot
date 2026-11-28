@@ -110,6 +110,9 @@ class AppealIntegrationTest {
         long id = create("ALERT", confirmedAlert, driverToken);
         decide(id, "REVOKED").andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("REVOKED"));
         assertThat(alertStatus(confirmedAlert)).isEqualTo("REVOKED");
+        assertThat(jdbc.queryForObject("""
+                SELECT CONCAT(status,'/',source,'/',revision) FROM alert_archive_outbox WHERE alert_id=?
+                """, String.class, confirmedAlert)).isEqualTo("REVOKED/APPEAL/1");
         mvc.perform(get("/api/appeals/" + id).header("Authorization", driverToken))
                 .andExpect(jsonPath("$.data.effectiveStatus").value("REVOKED"));
         mvc.perform(get("/api/recognitions/" + rec).header("Authorization", driverToken))
@@ -335,6 +338,7 @@ class AppealIntegrationTest {
         doThrow(new DataAccessResourceFailureException("injected event failure")).when(mapper).insertEvent(any(AppealEvent.class));
         decide(id, "REVOKED").andExpect(status().isInternalServerError()).andExpect(jsonPath("$.code").value(500));
         assertThat(appealStatus(id)).isEqualTo("PENDING"); assertThat(alertStatus(confirmedAlert)).isEqualTo("CONFIRMED");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM alert_archive_outbox WHERE alert_id=?", Integer.class, confirmedAlert)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM alert_review_record WHERE alert_id=?", Integer.class, confirmedAlert)).isZero();
         reset(mapper);
         decide(id, "REVOKED").andExpect(status().isOk());

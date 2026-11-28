@@ -12,6 +12,8 @@ import mapper.VehicleMapper;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import service.alert.archive.AlertArchiveQueue;
+import service.alert.archive.ArchiveEvent;
 import service.alert.rule.AlertKind;
 import service.alert.rule.AlertRuleEngine;
 import service.alert.rule.RecognitionDecisionReason;
@@ -42,6 +44,7 @@ public class AlertDecisionService {
     private final SmsChannelProperties smsProperties;
     private final CameraMapper cameras;
     private final FfmpegManager ffmpeg;
+    private final AlertArchiveQueue archive;
 
     /** 锁定车辆状态，识别记录、告警和计数一起提交；重试不会重复累计。 */
     @Transactional(rollbackFor = Exception.class)
@@ -110,6 +113,7 @@ public class AlertDecisionService {
                     : kind == AlertKind.BACKLOG ? evaluation.state().getOtherEvents() : 0);
             alert.setSmsStatus(kind == AlertKind.SMS_ALERT ? "PENDING" : "NOT_REQUIRED");
             mapper.insertAlert(alert);
+            if (violation) { archive.record(alert.getId(), ArchiveEvent.Source.CREATED); }
             if (kind == AlertKind.SMS_ALERT && smsProperties.getMode() == SmsChannelProperties.Mode.ALIYUN) {
                 smsDeliveries.enqueue(alert.getId(), smsProperties.getAliyun().getOutIdPrefix() + "-" + alert.getId());
             }

@@ -85,6 +85,9 @@ class AlertReviewIntegrationTest {
                 .andExpect(jsonPath("$.data.reason").value("人工核实手机行为"))
                 .andExpect(jsonPath("$.data.operatorId").value(admin))
                 .andExpect(jsonPath("$.data.operatorUsername").value(adminUsername));
+        assertThat(jdbc.queryForObject("""
+                SELECT CONCAT(status,'/',source,'/',revision) FROM alert_archive_outbox WHERE alert_id=?
+                """, String.class, phone)).isEqualTo("CONFIRMED/DIRECT_REVIEW/1");
         var time = jdbc.queryForObject("SELECT operated_at FROM alert_review_record WHERE alert_id=?", LocalDateTime.class, phone);
         assertThat(time).isBetween(before, LocalDateTime.now(ZoneId.of("Asia/Shanghai")).plusSeconds(1));
         mvc.perform(get("/api/alerts/" + phone).header("Authorization", driverToken))
