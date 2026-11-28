@@ -369,6 +369,28 @@ CREATE TABLE IF NOT EXISTS driver_leave (
     KEY idx_driver_leave_interval (driver_id, status, starts_at, ends_at)
 ) COMMENT '司机请假和审批';
 
+CREATE TABLE IF NOT EXISTS transport_order (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    order_no VARCHAR(48) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    fleet_id BIGINT NOT NULL,
+    task_type VARCHAR(40) NOT NULL,
+    description VARCHAR(500) NOT NULL,
+    origin_address VARCHAR(255) NOT NULL,
+    destination_address VARCHAR(255) NOT NULL,
+    starts_at DATETIME(3) NOT NULL,
+    ends_at DATETIME(3) NOT NULL,
+    requirement VARCHAR(8) NOT NULL DEFAULT 'NORMAL',
+    version BIGINT NOT NULL DEFAULT 1,
+    current_task_id BIGINT NULL,
+    canceled_at DATETIME(3) NULL,
+    created_by BIGINT NOT NULL,
+    created_at DATETIME(3) NOT NULL,
+    updated_at DATETIME(3) NOT NULL,
+    UNIQUE KEY uk_transport_order_no (order_no),
+    KEY idx_transport_order_fleet (fleet_id, id),
+    CONSTRAINT fk_transport_order_fleet FOREIGN KEY (fleet_id) REFERENCES fleet(id) ON DELETE RESTRICT
+) COMMENT '待派运输订单';
+
 CREATE TABLE IF NOT EXISTS transport_task (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     driver_id BIGINT NOT NULL,
@@ -388,7 +410,15 @@ CREATE TABLE IF NOT EXISTS transport_task (
     end_lat DOUBLE NULL,
     end_lon DOUBLE NULL,
     request_key VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    transport_order_id BIGINT NULL,
+    origin_address VARCHAR(255) NULL,
+    destination_address VARCHAR(255) NULL,
+    requirement VARCHAR(8) NOT NULL DEFAULT 'NORMAL',
+    order_dispatch_key VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    dispatch_order_version BIGINT NULL,
     UNIQUE KEY uk_task_actor_request (created_by, request_key),
+    UNIQUE KEY uk_transport_order_dispatch (transport_order_id, order_dispatch_key),
+    CONSTRAINT fk_transport_task_order FOREIGN KEY (transport_order_id) REFERENCES transport_order(id) ON DELETE RESTRICT,
     KEY idx_transport_driver_interval (driver_id, status, starts_at, ends_at),
     KEY idx_transport_vehicle_interval (vehicle_id, status, starts_at, ends_at)
 ) COMMENT '运输任务和出发完成报到';

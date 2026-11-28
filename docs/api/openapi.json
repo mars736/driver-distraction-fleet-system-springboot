@@ -506,6 +506,180 @@
         }
       }
     },
+    "/api/operations/transport-orders/{id}" : {
+      "get" : {
+        "tags" : [ "transport-order-controller" ],
+        "operationId" : "detail",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ResultTransportOrderDetail"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "未登录或令牌失效",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "权限不足",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "业务或请求错误，使用 code、message、data 响应",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [ "transport-order-controller" ],
+        "operationId" : "update_1",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Edit"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ResultOrderRow"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "未登录或令牌失效",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "权限不足",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "业务或请求错误，使用 code、message、data 响应",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "409" : {
+            "description" : "订单状态或版本已变化",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "object",
+                  "required" : [ "code", "message", "data" ],
+                  "properties" : {
+                    "code" : {
+                      "type" : "integer",
+                      "enum" : [ 409 ]
+                    },
+                    "message" : {
+                      "type" : "string"
+                    },
+                    "data" : {
+                      "type" : "object",
+                      "required" : [ "reason" ],
+                      "properties" : {
+                        "reason" : {
+                          "type" : "string",
+                          "enum" : [ "ORDER_NOT_DISPATCHABLE", "ORDER_VERSION_CONFLICT" ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "examples" : {
+                  "ORDER_NOT_DISPATCHABLE" : {
+                    "summary" : "订单当前不在待派单状态",
+                    "value" : {
+                      "code" : 409,
+                      "message" : "订单当前不在待派单状态",
+                      "data" : {
+                        "reason" : "ORDER_NOT_DISPATCHABLE"
+                      }
+                    }
+                  },
+                  "ORDER_VERSION_CONFLICT" : {
+                    "summary" : "订单已变化，请刷新后再操作",
+                    "value" : {
+                      "code" : 409,
+                      "message" : "订单已变化，请刷新后再操作",
+                      "data" : {
+                        "reason" : "ORDER_VERSION_CONFLICT"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/operations/fleet/vehicles/{id}/odometer" : {
       "get" : {
         "tags" : [ "fleet-care-controller" ],
@@ -896,7 +1070,7 @@
       },
       "put" : {
         "tags" : [ "fleet-controller" ],
-        "operationId" : "update_1",
+        "operationId" : "update_2",
         "parameters" : [ {
           "name" : "id",
           "in" : "path",
@@ -1073,7 +1247,7 @@
       },
       "put" : {
         "tags" : [ "driver-controller" ],
-        "operationId" : "update_2",
+        "operationId" : "update_3",
         "parameters" : [ {
           "name" : "id",
           "in" : "path",
@@ -1298,7 +1472,7 @@
       },
       "put" : {
         "tags" : [ "camera-controller" ],
-        "operationId" : "update_3",
+        "operationId" : "update_4",
         "parameters" : [ {
           "name" : "id",
           "in" : "path",
@@ -3107,6 +3281,444 @@
         }
       }
     },
+    "/api/operations/transport-orders" : {
+      "get" : {
+        "tags" : [ "transport-order-controller" ],
+        "operationId" : "list_2",
+        "parameters" : [ {
+          "name" : "fleetId",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }, {
+          "name" : "status",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "WAITING_DISPATCH", "ASSIGNED", "IN_TRANSIT", "COMPLETED", "CANCELED" ]
+          }
+        }, {
+          "name" : "requirement",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "NORMAL", "HIGH" ]
+          }
+        }, {
+          "name" : "page",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 1
+          }
+        }, {
+          "name" : "pageSize",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 20
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ResultPageResultOrderRow"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "未登录或令牌失效",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "权限不足",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "业务或请求错误，使用 code、message、data 响应",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "transport-order-controller" ],
+        "operationId" : "create_2",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Draft"
+              },
+              "example" : {
+                "fleetId" : 1,
+                "taskType" : "器械运输",
+                "description" : "送货交接",
+                "originAddress" : "集美区示例路 10 号 A 库",
+                "destinationAddress" : "湖里区示例路 20 号收货口",
+                "startsAt" : "2030-12-03T08:00:00",
+                "endsAt" : "2030-12-03T12:00:00",
+                "requirement" : "NORMAL"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ResultOrderRow"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "未登录或令牌失效",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "权限不足",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "业务或请求错误，使用 code、message、data 响应",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/operations/transport-orders/{id}/cancel" : {
+      "post" : {
+        "tags" : [ "transport-order-controller" ],
+        "operationId" : "cancel_1",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Cancel"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ResultOrderRow"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "未登录或令牌失效",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "权限不足",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "业务或请求错误，使用 code、message、data 响应",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "409" : {
+            "description" : "订单状态或版本已变化",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "object",
+                  "required" : [ "code", "message", "data" ],
+                  "properties" : {
+                    "code" : {
+                      "type" : "integer",
+                      "enum" : [ 409 ]
+                    },
+                    "message" : {
+                      "type" : "string"
+                    },
+                    "data" : {
+                      "type" : "object",
+                      "required" : [ "reason" ],
+                      "properties" : {
+                        "reason" : {
+                          "type" : "string",
+                          "enum" : [ "ORDER_NOT_DISPATCHABLE", "ORDER_VERSION_CONFLICT" ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "examples" : {
+                  "ORDER_NOT_DISPATCHABLE" : {
+                    "summary" : "订单当前不在待派单状态",
+                    "value" : {
+                      "code" : 409,
+                      "message" : "订单当前不在待派单状态",
+                      "data" : {
+                        "reason" : "ORDER_NOT_DISPATCHABLE"
+                      }
+                    }
+                  },
+                  "ORDER_VERSION_CONFLICT" : {
+                    "summary" : "订单已变化，请刷新后再操作",
+                    "value" : {
+                      "code" : 409,
+                      "message" : "订单已变化，请刷新后再操作",
+                      "data" : {
+                        "reason" : "ORDER_VERSION_CONFLICT"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/operations/transport-orders/{id}/assign" : {
+      "post" : {
+        "tags" : [ "transport-order-controller" ],
+        "operationId" : "assign_1",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/TransportOrderAssignment"
+              },
+              "example" : {
+                "driverId" : 18,
+                "vehicleId" : 42,
+                "expectedVersion" : 1
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ResultDispatchReceipt"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "未登录或令牌失效",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "权限不足",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "业务或请求错误，使用 code、message、data 响应",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "409" : {
+            "description" : "订单派发或候选资格冲突",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "object",
+                  "required" : [ "code", "message", "data" ],
+                  "properties" : {
+                    "code" : {
+                      "type" : "integer",
+                      "enum" : [ 409 ]
+                    },
+                    "message" : {
+                      "type" : "string"
+                    },
+                    "data" : {
+                      "type" : "object",
+                      "required" : [ "reason" ],
+                      "properties" : {
+                        "reason" : {
+                          "type" : "string",
+                          "enum" : [ "DRIVER_NOT_ELIGIBLE", "ORDER_NOT_DISPATCHABLE", "ORDER_REQUEST_KEY_REUSED", "ORDER_VERSION_CONFLICT", "RATING_UNAVAILABLE" ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "examples" : {
+                  "DRIVER_NOT_ELIGIBLE" : {
+                    "summary" : "司机或车辆已有冲突任务",
+                    "value" : {
+                      "code" : 409,
+                      "message" : "司机或车辆已有冲突任务",
+                      "data" : {
+                        "reason" : "DRIVER_NOT_ELIGIBLE"
+                      }
+                    }
+                  },
+                  "ORDER_NOT_DISPATCHABLE" : {
+                    "summary" : "订单当前不在待派单状态",
+                    "value" : {
+                      "code" : 409,
+                      "message" : "订单当前不在待派单状态",
+                      "data" : {
+                        "reason" : "ORDER_NOT_DISPATCHABLE"
+                      }
+                    }
+                  },
+                  "ORDER_REQUEST_KEY_REUSED" : {
+                    "summary" : "请求标识已用于不同派发条件",
+                    "value" : {
+                      "code" : 409,
+                      "message" : "请求标识已用于不同派发条件",
+                      "data" : {
+                        "reason" : "ORDER_REQUEST_KEY_REUSED"
+                      }
+                    }
+                  },
+                  "ORDER_VERSION_CONFLICT" : {
+                    "summary" : "订单已变化，请刷新后再操作",
+                    "value" : {
+                      "code" : 409,
+                      "message" : "订单已变化，请刷新后再操作",
+                      "data" : {
+                        "reason" : "ORDER_VERSION_CONFLICT"
+                      }
+                    }
+                  },
+                  "RATING_UNAVAILABLE" : {
+                    "summary" : "高要求任务需要已发布的司机长期评级",
+                    "value" : {
+                      "code" : 409,
+                      "message" : "高要求任务需要已发布的司机长期评级",
+                      "data" : {
+                        "reason" : "RATING_UNAVAILABLE"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "description" : "重试同一派发使用相同 Idempotency-Key 和请求内容。"
+      }
+    },
     "/api/operations/fleet/vehicles/{id}/repairs" : {
       "get" : {
         "tags" : [ "fleet-care-controller" ],
@@ -3822,7 +4434,7 @@
     "/api/fleets" : {
       "get" : {
         "tags" : [ "fleet-controller" ],
-        "operationId" : "list_2",
+        "operationId" : "list_3",
         "parameters" : [ {
           "name" : "keyword",
           "in" : "query",
@@ -3894,7 +4506,7 @@
       },
       "post" : {
         "tags" : [ "fleet-controller" ],
-        "operationId" : "create_2",
+        "operationId" : "create_3",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -3952,7 +4564,7 @@
     "/api/drivers" : {
       "get" : {
         "tags" : [ "driver-controller" ],
-        "operationId" : "list_3",
+        "operationId" : "list_4",
         "parameters" : [ {
           "name" : "fleetId",
           "in" : "query",
@@ -4032,7 +4644,7 @@
       },
       "post" : {
         "tags" : [ "driver-controller" ],
-        "operationId" : "create_3",
+        "operationId" : "create_4",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -4137,7 +4749,7 @@
     "/api/cameras" : {
       "get" : {
         "tags" : [ "camera-controller" ],
-        "operationId" : "list_4",
+        "operationId" : "list_5",
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -4183,7 +4795,7 @@
       },
       "post" : {
         "tags" : [ "camera-controller" ],
-        "operationId" : "create_4",
+        "operationId" : "create_5",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -4406,7 +5018,7 @@
     "/api/appeals" : {
       "get" : {
         "tags" : [ "appeal-controller" ],
-        "operationId" : "list_5",
+        "operationId" : "list_6",
         "parameters" : [ {
           "name" : "request",
           "in" : "query",
@@ -4460,7 +5072,7 @@
       },
       "post" : {
         "tags" : [ "appeal-controller" ],
-        "operationId" : "create_5",
+        "operationId" : "create_6",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -5781,7 +6393,7 @@
     "/api/vehicles/live-status" : {
       "get" : {
         "tags" : [ "vehicle-live-status-controller" ],
-        "operationId" : "list_6",
+        "operationId" : "list_7",
         "parameters" : [ {
           "name" : "fleetId",
           "in" : "query",
@@ -6096,7 +6708,7 @@
     "/api/scores/drivers/{driverId}/detail" : {
       "get" : {
         "tags" : [ "driver-score-controller" ],
-        "operationId" : "detail",
+        "operationId" : "detail_1",
         "parameters" : [ {
           "name" : "driverId",
           "in" : "path",
@@ -6160,7 +6772,7 @@
     "/api/report-jobs/{id}" : {
       "get" : {
         "tags" : [ "report-job-controller" ],
-        "operationId" : "detail_1",
+        "operationId" : "detail_2",
         "parameters" : [ {
           "name" : "id",
           "in" : "path",
@@ -6281,7 +6893,7 @@
     "/api/recognitions" : {
       "get" : {
         "tags" : [ "recognition-query-controller" ],
-        "operationId" : "list_7",
+        "operationId" : "list_8",
         "parameters" : [ {
           "name" : "request",
           "in" : "query",
@@ -6337,7 +6949,7 @@
     "/api/recognitions/{id}" : {
       "get" : {
         "tags" : [ "recognition-query-controller" ],
-        "operationId" : "detail_2",
+        "operationId" : "detail_3",
         "parameters" : [ {
           "name" : "id",
           "in" : "path",
@@ -7063,7 +7675,7 @@
     "/api/operations/violation-dispatch/orders" : {
       "get" : {
         "tags" : [ "violation-dispatch-controller" ],
-        "operationId" : "list_8",
+        "operationId" : "list_9",
         "parameters" : [ {
           "name" : "filter",
           "in" : "query",
@@ -7137,7 +7749,7 @@
     "/api/operations/violation-dispatch/orders/{id}" : {
       "get" : {
         "tags" : [ "violation-dispatch-controller" ],
-        "operationId" : "detail_3",
+        "operationId" : "detail_4",
         "parameters" : [ {
           "name" : "id",
           "in" : "path",
@@ -7284,6 +7896,81 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ResultOrderPage"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "未登录或令牌失效",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "权限不足",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "业务或请求错误，使用 code、message、data 响应",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/operations/transport-orders/{id}/candidates" : {
+      "get" : {
+        "tags" : [ "transport-order-controller" ],
+        "operationId" : "candidates_1",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }, {
+          "name" : "page",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 1
+          }
+        }, {
+          "name" : "pageSize",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 20
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ResultPageResultTransportOrderCandidate"
                 }
               }
             }
@@ -7512,7 +8199,7 @@
     "/api/operation-logs" : {
       "get" : {
         "tags" : [ "operation-log-controller" ],
-        "operationId" : "list_9",
+        "operationId" : "list_10",
         "parameters" : [ {
           "name" : "fleetId",
           "in" : "query",
@@ -7535,7 +8222,7 @@
           "required" : false,
           "schema" : {
             "type" : "string",
-            "enum" : [ "AUTH_REGISTER", "AUTH_LOGIN", "AUTH_LOGOUT", "AUTH_PASSWORD", "AUTH_ENABLED", "FLEET_CREATE", "FLEET_UPDATE", "FLEET_ENABLED", "FLEET_DELETE", "VEHICLE_CREATE", "VEHICLE_UPDATE", "VEHICLE_MONITOR", "VEHICLE_DELETE", "DRIVER_CREATE", "DRIVER_UPDATE", "DRIVER_STATUS", "DRIVER_BIND_VEHICLE", "DRIVER_DELETE", "CAMERA_CREATE", "CAMERA_UPDATE", "CAMERA_ENABLED", "CAMERA_DELETE", "ALERT_REVIEW", "APPEAL_DECIDE", "ALERT_EXPORT", "RECOGNITION_DELETE", "REPORT_CREATE", "REPORT_DOWNLOAD", "SHIFT_SAVE", "SHIFT_PUNCH", "LEAVE_CREATE", "LEAVE_DECIDE", "TASK_CREATE", "TASK_REPORT", "TASK_CANCEL", "ODOMETER_SAVE", "MAINTENANCE_CREATE", "MAINTENANCE_COMPLETE", "MAINTENANCE_ENABLED", "REPAIR_CREATE", "REPAIR_TRANSITION", "FUEL_SAVE", "CERTIFICATE_SAVE", "DISPATCH_ASSIGN", "DISPATCH_START", "DISPATCH_CLOSE", "DISPATCH_PERSONNEL", "DISPATCH_ALERT_REVOKED", "DISPATCH_REVOCATION_WRAPUP", "DISPATCH_LEGACY_REVOCATION" ]
+            "enum" : [ "AUTH_REGISTER", "AUTH_LOGIN", "AUTH_LOGOUT", "AUTH_PASSWORD", "AUTH_ENABLED", "FLEET_CREATE", "FLEET_UPDATE", "FLEET_ENABLED", "FLEET_DELETE", "VEHICLE_CREATE", "VEHICLE_UPDATE", "VEHICLE_MONITOR", "VEHICLE_DELETE", "DRIVER_CREATE", "DRIVER_UPDATE", "DRIVER_STATUS", "DRIVER_BIND_VEHICLE", "DRIVER_DELETE", "CAMERA_CREATE", "CAMERA_UPDATE", "CAMERA_ENABLED", "CAMERA_DELETE", "ALERT_REVIEW", "APPEAL_DECIDE", "ALERT_EXPORT", "RECOGNITION_DELETE", "REPORT_CREATE", "REPORT_DOWNLOAD", "SHIFT_SAVE", "SHIFT_PUNCH", "LEAVE_CREATE", "LEAVE_DECIDE", "TASK_CREATE", "TASK_REPORT", "TASK_CANCEL", "TRANSPORT_ORDER_CREATE", "TRANSPORT_ORDER_UPDATE", "TRANSPORT_ORDER_ASSIGN", "TRANSPORT_ORDER_CANCEL", "ODOMETER_SAVE", "MAINTENANCE_CREATE", "MAINTENANCE_COMPLETE", "MAINTENANCE_ENABLED", "REPAIR_CREATE", "REPAIR_TRANSITION", "FUEL_SAVE", "CERTIFICATE_SAVE", "DISPATCH_ASSIGN", "DISPATCH_START", "DISPATCH_CLOSE", "DISPATCH_PERSONNEL", "DISPATCH_ALERT_REVOKED", "DISPATCH_REVOCATION_WRAPUP", "DISPATCH_LEGACY_REVOCATION" ]
           }
         }, {
           "name" : "targetId",
@@ -8057,7 +8744,7 @@
     "/api/appeals/{id}" : {
       "get" : {
         "tags" : [ "appeal-controller" ],
-        "operationId" : "detail_4",
+        "operationId" : "detail_5",
         "parameters" : [ {
           "name" : "id",
           "in" : "path",
@@ -8249,7 +8936,7 @@
     "/api/alerts" : {
       "get" : {
         "tags" : [ "alert-query-controller" ],
-        "operationId" : "list_10",
+        "operationId" : "list_11",
         "parameters" : [ {
           "name" : "request",
           "in" : "query",
@@ -8305,7 +8992,7 @@
     "/api/alerts/{id}" : {
       "get" : {
         "tags" : [ "alert-query-controller" ],
-        "operationId" : "detail_5",
+        "operationId" : "detail_6",
         "parameters" : [ {
           "name" : "id",
           "in" : "path",
@@ -8889,6 +9576,138 @@
           },
           "data" : {
             "type" : "object"
+          }
+        }
+      },
+      "Edit" : {
+        "required" : [ "description", "destinationAddress", "endsAt", "expectedVersion", "fleetId", "originAddress", "startsAt", "taskType" ],
+        "type" : "object",
+        "properties" : {
+          "fleetId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "taskType" : {
+            "maxLength" : 40,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "description" : {
+            "maxLength" : 500,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "originAddress" : {
+            "maxLength" : 255,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "destinationAddress" : {
+            "maxLength" : 255,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "startsAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "endsAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "requirement" : {
+            "type" : "string",
+            "enum" : [ "NORMAL", "HIGH" ]
+          },
+          "expectedVersion" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "OrderRow" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "orderNo" : {
+            "type" : "string"
+          },
+          "fleetId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "taskType" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "originAddress" : {
+            "type" : "string"
+          },
+          "destinationAddress" : {
+            "type" : "string"
+          },
+          "startsAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "endsAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "requirement" : {
+            "type" : "string",
+            "enum" : [ "NORMAL", "HIGH" ]
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "taskId" : {
+            "type" : "integer",
+            "format" : "int64",
+            "nullable" : true
+          },
+          "driverId" : {
+            "type" : "integer",
+            "format" : "int64",
+            "nullable" : true
+          },
+          "vehicleId" : {
+            "type" : "integer",
+            "format" : "int64",
+            "nullable" : true
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "WAITING_DISPATCH", "ASSIGNED", "IN_TRANSIT", "COMPLETED", "CANCELED" ]
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "ResultOrderRow" : {
+        "type" : "object",
+        "properties" : {
+          "code" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "data" : {
+            "$ref" : "#/components/schemas/OrderRow"
           }
         }
       },
@@ -9631,6 +10450,27 @@
           "endLon" : {
             "type" : "number",
             "format" : "double"
+          },
+          "orderId" : {
+            "type" : "integer",
+            "format" : "int64",
+            "nullable" : true
+          },
+          "orderNo" : {
+            "type" : "string",
+            "nullable" : true
+          },
+          "originAddress" : {
+            "type" : "string",
+            "nullable" : true
+          },
+          "destinationAddress" : {
+            "type" : "string",
+            "nullable" : true
+          },
+          "requirement" : {
+            "type" : "string",
+            "enum" : [ "NORMAL", "HIGH" ]
           }
         }
       },
@@ -10094,6 +10934,112 @@
           "assigneeId" : {
             "type" : "integer",
             "format" : "int64"
+          }
+        }
+      },
+      "Draft" : {
+        "required" : [ "description", "destinationAddress", "endsAt", "fleetId", "originAddress", "startsAt", "taskType" ],
+        "type" : "object",
+        "properties" : {
+          "fleetId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "taskType" : {
+            "maxLength" : 40,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "description" : {
+            "maxLength" : 500,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "originAddress" : {
+            "maxLength" : 255,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "destinationAddress" : {
+            "maxLength" : 255,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "startsAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "endsAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "requirement" : {
+            "type" : "string",
+            "enum" : [ "NORMAL", "HIGH" ]
+          }
+        }
+      },
+      "Cancel" : {
+        "required" : [ "expectedVersion" ],
+        "type" : "object",
+        "properties" : {
+          "expectedVersion" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "TransportOrderAssignment" : {
+        "required" : [ "driverId", "expectedVersion", "vehicleId" ],
+        "type" : "object",
+        "properties" : {
+          "driverId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "vehicleId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "expectedVersion" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "DispatchReceipt" : {
+        "type" : "object",
+        "properties" : {
+          "orderId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "taskId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "WAITING_DISPATCH", "ASSIGNED", "IN_TRANSIT", "COMPLETED", "CANCELED" ]
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "ResultDispatchReceipt" : {
+        "type" : "object",
+        "properties" : {
+          "code" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "data" : {
+            "$ref" : "#/components/schemas/DispatchReceipt"
           }
         }
       },
@@ -12208,6 +13154,233 @@
           },
           "data" : {
             "$ref" : "#/components/schemas/OrderPage"
+          }
+        }
+      },
+      "PageResultOrderRow" : {
+        "type" : "object",
+        "properties" : {
+          "list" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OrderRow"
+            }
+          },
+          "total" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "pageSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "ResultPageResultOrderRow" : {
+        "type" : "object",
+        "properties" : {
+          "code" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "data" : {
+            "$ref" : "#/components/schemas/PageResultOrderRow"
+          }
+        }
+      },
+      "ResultTransportOrderDetail" : {
+        "type" : "object",
+        "properties" : {
+          "code" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "data" : {
+            "$ref" : "#/components/schemas/TransportOrderDetail"
+          }
+        }
+      },
+      "TransportOrderDetail" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "orderNo" : {
+            "type" : "string"
+          },
+          "fleetId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "taskType" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "originAddress" : {
+            "type" : "string"
+          },
+          "destinationAddress" : {
+            "type" : "string"
+          },
+          "startsAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "endsAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "requirement" : {
+            "type" : "string",
+            "enum" : [ "NORMAL", "HIGH" ]
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "taskId" : {
+            "type" : "integer",
+            "format" : "int64",
+            "nullable" : true
+          },
+          "driverId" : {
+            "type" : "integer",
+            "format" : "int64",
+            "nullable" : true
+          },
+          "vehicleId" : {
+            "type" : "integer",
+            "format" : "int64",
+            "nullable" : true
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "WAITING_DISPATCH", "ASSIGNED", "IN_TRANSIT", "COMPLETED", "CANCELED" ]
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "assignments" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Task"
+            }
+          }
+        }
+      },
+      "PageResultTransportOrderCandidate" : {
+        "type" : "object",
+        "properties" : {
+          "list" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TransportOrderCandidate"
+            }
+          },
+          "total" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "pageSize" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "ResultPageResultTransportOrderCandidate" : {
+        "type" : "object",
+        "properties" : {
+          "code" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "data" : {
+            "$ref" : "#/components/schemas/PageResultTransportOrderCandidate"
+          }
+        }
+      },
+      "SafetyRating" : {
+        "type" : "object",
+        "properties" : {
+          "batchId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "score" : {
+            "type" : "number"
+          },
+          "level" : {
+            "type" : "string"
+          },
+          "dataAsOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "publishedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "hasDrivingHistory" : {
+            "type" : "boolean"
+          }
+        },
+        "nullable" : true
+      },
+      "TransportOrderCandidate" : {
+        "type" : "object",
+        "properties" : {
+          "driverId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "driverName" : {
+            "type" : "string"
+          },
+          "vehicleId" : {
+            "type" : "integer",
+            "format" : "int64",
+            "nullable" : true
+          },
+          "plateNo" : {
+            "type" : "string",
+            "nullable" : true
+          },
+          "safetyRating" : {
+            "$ref" : "#/components/schemas/SafetyRating"
+          },
+          "eligible" : {
+            "type" : "boolean"
+          },
+          "unavailableReason" : {
+            "type" : "string",
+            "enum" : [ "ORDER_VERSION_CONFLICT", "ORDER_NOT_DISPATCHABLE", "ORDER_REQUEST_KEY_REUSED", "RATING_UNAVAILABLE", "DRIVER_NOT_ELIGIBLE", null ],
+            "nullable" : true
           }
         }
       },

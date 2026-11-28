@@ -12,6 +12,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 import service.operations.OperationsReminderService;
 
@@ -37,6 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 class FleetOperationsIntegrationTest {
     private static final String WORK = "/api/operations/workforce";
+    private static final String ORDERS = "/api/operations/transport-orders";
     private static final String CARE = "/api/operations/fleet";
     private static final String OPS = "/api/operations";
 
@@ -85,6 +87,7 @@ class FleetOperationsIntegrationTest {
         jdbc.update("DELETE FROM driver_shift WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM driver_leave WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM transport_task WHERE fleet_id=?", fleet);
+        jdbc.update("DELETE FROM transport_order WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM operation_log WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM sys_user WHERE fleet_id=?", fleet);
         jdbc.update("DELETE FROM vehicle WHERE fleet_id=?", fleet);
@@ -427,6 +430,129 @@ class FleetOperationsIntegrationTest {
         assertThat(LocalDateTime.parse(revision.path("beforeEndsAt").asText())).isEqualTo(originalEnd);
         assertThat(LocalDateTime.parse(revision.path("afterStartsAt").asText())).isEqualTo(editedStart);
         assertThat(LocalDateTime.parse(revision.path("afterEndsAt").asText())).isEqualTo(editedEnd);
+    }
+
+    @Test
+    void transportOrderKeepsAddressSnapshotsAcrossCancellationRedispatchAndDriverReports() throws Exception {
+        prepareOnDuty();
+        var invalid = orderBody("NORMAL", "  ", "仓库 B");
+        call(HttpMethod.POST, ORDERS, admin, invalid, 400);
+        var draft = orderBody("NORMAL", "  仓库 A  ", "仓库 B");
+        var created = call(HttpMethod.POST, ORDERS, admin, draft, 200);
+        long orderId = id(created);
+        String path = ORDERS + "/" + orderId;
+        assertThat(created.path("status").asText()).isEqualTo("WAITING_DISPATCH");
+        assertThat(created.path("originAddress").asText()).isEqualTo("仓库 A");
+        assertThat(created.path("taskId").isNull()).isTrue();
+        call(HttpMethod.GET, path, driver, null, 403);
+        call(HttpMethod.GET, path + "/candidates", otherDriver, null, 403);
+        var candidates = call(HttpMethod.GET, path + "/candidates", admin, null, 200);
+        assertThat(candidates.path("total").asLong()).isEqualTo(2);
+        assertThat(candidates.path("list").get(0).path("driverId").asLong()).isEqualTo(driver);
+        assertThat(candidates.path("list").get(0).path("eligible").asBoolean()).isTrue();
+        assertThat(candidates.path("list").get(1).path("unavailableReason").asText()).isEqualTo("DRIVER_NOT_ELIGIBLE");
+
+        var assign = Map.of("driverId", driver, "vehicleId", vehicle, "expectedVersion", 1);
+        call(HttpMethod.POST, path + "/assign", admin, assign, 400);
+        var first = orderAssign(path, admin, assign, "first-dispatch", 200);
+        long taskId = first.path("taskId").asLong();
+        assertThat(first.path("version").asLong()).isEqualTo(2);
+        assertThat(orderAssign(path, admin, assign, "first-dispatch", 200)).isEqualTo(first);
+        assertThat(orderAssign(path, admin, Map.of("driverId", otherDriver, "vehicleId", vehicle, "expectedVersion", 1),
+                "first-dispatch", 409).path("reason").asText()).isEqualTo("ORDER_REQUEST_KEY_REUSED");
+
+        String firstPath = WORK + "/tasks/" + taskId;
+        assertThat(call(HttpMethod.GET, firstPath, driver, null, 200).path("orderNo").asText())
+                .isEqualTo(created.path("orderNo").asText());
+        assertThat(call(HttpMethod.GET, WORK + "/tasks/page", driver, null, 200).path("records").get(0)
+                .path("destinationAddress").asText()).isEqualTo("仓库 B");
+        call(HttpMethod.GET, firstPath, otherDriver, null, 404);
+        assertThat(call(HttpMethod.POST, path + "/cancel", admin, Map.of("expectedVersion", 2), 409)
+                .path("reason").asText()).isEqualTo("ORDER_NOT_DISPATCHABLE");
+        call(HttpMethod.POST, firstPath + "/cancel", admin, null, 200);
+        var returned = call(HttpMethod.GET, path, admin, null, 200);
+        assertThat(returned.path("status").asText()).isEqualTo("WAITING_DISPATCH");
+        assertThat(returned.path("taskId").isNull()).isTrue();
+        assertThat(returned.path("assignments")).hasSize(1);
+
+        var edit = new java.util.HashMap<>(orderBody("NORMAL", "仓库 A", "仓库 C"));
+        edit.put("expectedVersion", 2);
+        var edited = call(HttpMethod.PUT, path, admin, edit, 200);
+        assertThat(edited.path("version").asLong()).isEqualTo(3);
+        assertThat(call(HttpMethod.PUT, path, admin, edit, 409).path("reason").asText()).isEqualTo("ORDER_VERSION_CONFLICT");
+        var second = orderAssign(path, admin, Map.of("driverId", driver, "vehicleId", vehicle, "expectedVersion", 3),
+                "second-dispatch", 200);
+        long secondId = second.path("taskId").asLong();
+        assertThat(secondId).isNotEqualTo(taskId);
+        assertThat(orderAssign(path, admin, assign, "first-dispatch", 200)).isEqualTo(first);
+
+        var point = Map.of("latitude", 24.48, "longitude", 118.08);
+        String secondPath = WORK + "/tasks/" + secondId;
+        var departed = call(HttpMethod.POST, secondPath + "/departure", driver, point, 200);
+        assertThat(departed.path("destinationAddress").asText()).isEqualTo("仓库 C");
+        assertThat(departed.path("departLat").asDouble()).isEqualTo(24.48);
+        assertThat(call(HttpMethod.GET, path, admin, null, 200).path("status").asText()).isEqualTo("IN_TRANSIT");
+        call(HttpMethod.POST, secondPath + "/completion", driver, point, 200);
+        var detail = call(HttpMethod.GET, path, admin, null, 200);
+        assertThat(detail.path("status").asText()).isEqualTo("COMPLETED");
+        assertThat(detail.path("assignments")).hasSize(2);
+        assertThat(detail.path("assignments").get(1).path("destinationAddress").asText()).isEqualTo("仓库 B");
+        assertThat(detail.path("assignments").get(1).path("status").asText()).isEqualTo("CANCELED");
+        assertThat(call(HttpMethod.GET, ORDERS + "?fleetId=" + fleet + "&status=COMPLETED&requirement=NORMAL",
+                admin, null, 200).path("total").asLong()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM transport_task WHERE transport_order_id=?", Long.class, orderId))
+                .isEqualTo(2);
+    }
+
+    @Test
+    void transportOrdersHandleConcurrentAssignmentEligibilityAndUnavailableRating() throws Exception {
+        prepareOnDuty();
+        var high = call(HttpMethod.POST, ORDERS, admin, orderBody("HIGH", "仓库 A", "仓库 B"), 200);
+        String highPath = ORDERS + "/" + id(high);
+        var request = Map.of("driverId", driver, "vehicleId", vehicle, "expectedVersion", 1);
+        assertThat(call(HttpMethod.GET, highPath + "/candidates", admin, null, 200).path("list").get(0)
+                .path("unavailableReason").asText()).isEqualTo("RATING_UNAVAILABLE");
+        assertThat(orderAssign(highPath, admin, request, "high-dispatch", 409).path("reason").asText())
+                .isEqualTo("RATING_UNAVAILABLE");
+        assertThat(call(HttpMethod.POST, highPath + "/cancel", admin, Map.of("expectedVersion", 1), 200)
+                .path("status").asText()).isEqualTo("CANCELED");
+
+        long secondAdmin = user("reviewer", "PLATFORM_ADMIN", null);
+        long orderId = id(call(HttpMethod.POST, ORDERS, admin, orderBody("NORMAL", "仓库 A", "仓库 B"), 200));
+        String path = ORDERS + "/" + orderId;
+        race(() -> orderDispatch(path, admin, request, "concurrent-a").getStatus(),
+                () -> orderDispatch(path, secondAdmin, request, "concurrent-b").getStatus());
+        assertThat(call(HttpMethod.GET, path, admin, null, 200).path("assignments")).hasSize(1);
+
+        var overlapping = id(call(HttpMethod.POST, ORDERS, admin, orderBody("NORMAL", "仓库 C", "仓库 D"), 200));
+        String overlapPath = ORDERS + "/" + overlapping;
+        assertThat(orderAssign(overlapPath, admin, request, "overlap", 409).path("reason").asText())
+                .isEqualTo("DRIVER_NOT_ELIGIBLE");
+        assertThat(call(HttpMethod.GET, overlapPath, admin, null, 200).path("assignments")).isEmpty();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM transport_task WHERE transport_order_id=?", Long.class, orderId))
+                .isEqualTo(1);
+    }
+
+    private Map<String, Object> orderBody(String requirement, String originAddress, String destinationAddress) {
+        return Map.of("fleetId", fleet, "taskType", "器械运输", "description", "交接测试货物",
+                "originAddress", originAddress, "destinationAddress", destinationAddress,
+                "startsAt", now.minusMinutes(1), "endsAt", now.plusHours(1), "requirement", requirement);
+    }
+
+    private JsonNode orderAssign(String orderPath, long actor, Object input, String key, int expectedStatus)
+            throws Exception {
+        var result = orderDispatch(orderPath, actor, input, key);
+        assertThat(result.getStatus()).isEqualTo(expectedStatus);
+        return json.readTree(result.getContentAsByteArray()).path("data");
+    }
+
+    private MockHttpServletResponse orderDispatch(String path, long actor, Object input,
+            String key) throws Exception {
+        return mvc.perform(request(HttpMethod.POST, path + "/assign")
+                        .header("Authorization", "Bearer " + jwt.generateToken(actor, 0))
+                        .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsBytes(input)))
+                .andReturn().getResponse();
     }
 
     @Test

@@ -1,5 +1,6 @@
 package mapper;
 
+import dto.operations.TransportOrders.TaskLink;
 import dto.operations.Workforce.*;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -93,6 +94,8 @@ public interface WorkforceMapper {
 
     Task task(@Param("id") long id);
 
+    List<Task> orderedTasks(@Param("orderId") long orderId);
+
     List<Task> tasks(@Param("driverId") Long driverId,
             @Param("fleetId") Long fleetId,
             @Param("status") TaskStatus status,
@@ -119,7 +122,8 @@ public interface WorkforceMapper {
             @Param("fleetId") long fleetId,
             @Param("actor") long actor,
             @Param("now") LocalDateTime now,
-            @Param("requestKey") String requestKey);
+            @Param("requestKey") String requestKey,
+            @Param("order") TaskLink order);
 
     int depart(@Param("id") long id, @Param("now") LocalDateTime now, @Param("position") Position position);
 

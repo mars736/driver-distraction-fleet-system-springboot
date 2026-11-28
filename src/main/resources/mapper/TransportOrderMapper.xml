@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.TransportOrderMapper">
+    <sql id="orderStatus">
+        CASE WHEN o.canceled_at IS NOT NULL THEN 'CANCELED'
+             WHEN t.status='PENDING' THEN 'ASSIGNED'
+             WHEN t.status='RUNNING' THEN 'IN_TRANSIT'
+             WHEN t.status='COMPLETED' THEN 'COMPLETED'
+             ELSE 'WAITING_DISPATCH' END
+    </sql>
+
+    <sql id="orderColumns">
+        o.id,o.order_no,o.fleet_id,o.task_type,o.description,o.origin_address,o.destination_address,
+        o.starts_at,o.ends_at,o.requirement,o.version,t.id AS task_id,t.driver_id,t.vehicle_id,
+        <include refid="orderStatus"/> AS status,o.created_at,o.updated_at
+    </sql>
+
+    <sql id="orders">
+        FROM transport_order o
+        LEFT JOIN transport_task t ON t.id=o.current_task_id AND t.transport_order_id=o.id AND t.status&lt;&gt;'CANCELED'
+    </sql>
+
+    <select id="detail" resultType="dto.operations.TransportOrders$OrderRow">
+        SELECT <include refid="orderColumns"/> <include refid="orders"/> WHERE o.id=#{id}
+    </select>
+
+    <select id="lock" resultType="java.lang.Long">
+        SELECT id FROM transport_order WHERE id=#{id} FOR UPDATE
+    </select>
+
+    <sql id="filters">
+        <where>
+            <if test="fleetId != null">AND o.fleet_id=#{fleetId}</if>
+            <if test="requirement != null">AND o.requirement=#{requirement}</if>
+            <if test="status != null">AND (<include refid="orderStatus"/>)=#{status}</if>
+        </where>
+    </sql>
+
+    <select id="list" resultType="dto.operations.TransportOrders$OrderRow">
+        SELECT <include refid="orderColumns"/> <include refid="orders"/> <include refid="filters"/>
+        ORDER BY o.id DESC LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*) <include refid="orders"/> <include refid="filters"/>
+    </select>
+
+    <insert id="create">
+        INSERT INTO transport_order(order_no,fleet_id,task_type,description,origin_address,destination_address,
+            starts_at,ends_at,requirement,created_by,created_at,updated_at)
+        VALUES(#{orderNo},#{draft.fleetId},#{draft.taskType},#{draft.description},#{draft.originAddress},
+            #{draft.destinationAddress},#{draft.startsAt},#{draft.endsAt},#{draft.requirement},#{actor},#{at},#{at})
+    </insert>
+
+    <update id="update">
+        UPDATE transport_order SET fleet_id=#{draft.fleetId},task_type=#{draft.taskType},description=#{draft.description},
+            origin_address=#{draft.originAddress},destination_address=#{draft.destinationAddress},
+            starts_at=#{draft.startsAt},ends_at=#{draft.endsAt},requirement=#{draft.requirement},
+            version=version+1,updated_at=#{at} WHERE id=#{id} AND version=#{version}
+    </update>
+
+    <update id="assign">
+        UPDATE transport_order SET current_task_id=#{taskId},version=version+1,updated_at=#{at}
+        WHERE id=#{id} AND version=#{version}
+    </update>
+
+    <update id="cancel">
+        UPDATE transport_order SET canceled_at=#{at},version=version+1,updated_at=#{at}
+        WHERE id=#{id} AND version=#{version}
+    </update>
+
+    <select id="replay" resultType="dto.operations.TransportOrders$Replay">
+        SELECT id AS task_id,driver_id,vehicle_id,dispatch_order_version AS expected_version
+        FROM transport_task WHERE transport_order_id=#{orderId} AND order_dispatch_key=#{requestKey}
+    </select>
+
+    <select id="candidates" resultType="dto.operations.TransportOrders$CandidateRow">
+        SELECT u.id AS driver_id,u.name AS driver_name,v.id AS vehicle_id,v.plate_no,
+            CASE
+                WHEN f.enabled=0 OR u.enabled=0 OR v.id IS NULL OR #{order.endsAt}&lt;=#{at}
+                  OR NOT EXISTS (
+                      SELECT 1 FROM driver_shift s JOIN driver_attendance a ON a.shift_id=s.id
+                      WHERE s.driver_id=u.id AND s.starts_at&lt;=#{at} AND s.ends_at&gt;#{at}
+                        AND a.clock_out_at IS NULL)
+                  OR EXISTS (
+                      SELECT 1 FROM driver_shift r WHERE r.driver_id=u.id AND r.shift_type='REST'
+                        AND (r.shift_date=DATE(#{at}) OR (r.shift_date&gt;=DATE(#{order.startsAt})
+                             AND CAST(r.shift_date AS DATETIME)&lt;#{order.endsAt})))
+                  OR EXISTS (
+                      SELECT 1 FROM driver_leave l WHERE l.driver_id=u.id AND l.status='APPROVED'
+                        AND ((l.starts_at&lt;=#{at} AND l.ends_at&gt;#{at}) OR
+                             (l.starts_at&lt;#{order.endsAt} AND l.ends_at&gt;#{order.startsAt})))
+                  OR EXISTS (
+                      SELECT 1 FROM transport_task t WHERE (t.driver_id=u.id OR t.vehicle_id=v.id)
+                        AND (t.status='RUNNING' OR (t.status='PENDING'
+                             AND t.starts_at&lt;#{order.endsAt} AND t.ends_at&gt;#{order.startsAt})))
+                THEN 'DRIVER_NOT_ELIGIBLE'
+                WHEN #{order.requirement}='HIGH' THEN 'RATING_UNAVAILABLE'
+                ELSE NULL
+            END AS unavailable_reason
+        FROM sys_user u JOIN fleet f ON f.id=u.fleet_id
+        LEFT JOIN vehicle v ON v.id=u.vehicle_id AND v.fleet_id=u.fleet_id
+        WHERE u.role='DRIVER' AND u.fleet_id=#{order.fleetId}
+        ORDER BY unavailable_reason IS NOT NULL,driver_id LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countCandidates" resultType="long">
+        SELECT COUNT(*) FROM sys_user WHERE role='DRIVER' AND fleet_id=#{fleetId}
+    </select>
+</mapper>

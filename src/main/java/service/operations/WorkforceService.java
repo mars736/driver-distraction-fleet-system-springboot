@@ -1,7 +1,9 @@
 package service.operations;
 
 import common.constant.CommonConstant;
+import common.exception.BusinessException;
 import common.security.UserContext;
+import dto.operations.TransportOrders.TaskLink;
 import dto.operations.Workforce.*;
 import entity.Fleet;
 import entity.User;
@@ -28,6 +30,7 @@ import java.util.function.ToLongFunction;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static dto.operations.TransportOrders.ConflictReason.DRIVER_NOT_ELIGIBLE;
 import static service.operations.OperationsAccess.*;
 import static service.operations.WorkforceConflict.Reason.*;
 import static service.operations.WorkforceConflict.require;
@@ -186,9 +189,29 @@ public class WorkforceService {
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public Task createTask(TaskRequest input, String requestKey) {
-        long actor = admin().userId();
+        return createTask(input, requestKey, null);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public Task createOrderTask(TaskRequest input, TaskLink order) {
+        try {
+            return createTask(input, null, order);
+        } catch (BusinessException exception) {
+            if (exception.getCode() == 404 || exception.getCode() == 409) {
+                throw new TransportOrderConflict(DRIVER_NOT_ELIGIBLE, exception.getMessage());
+            }
+            throw exception;
+        }
+    }
+
+    static void validateRequestKey(String requestKey) {
         check(requestKey == null || REQUEST_KEY.matcher(requestKey).matches(), 400,
                 "申请标识必须为 1—128 个字母、数字或 . _ : -");
+    }
+
+    private Task createTask(TaskRequest input, String requestKey, TaskLink order) {
+        long actor = admin().userId();
+        validateRequestKey(requestKey);
         input = new TaskRequest(input.driverId(), input.vehicleId(), input.type(), input.description(),
                 input.startsAt().truncatedTo(ChronoUnit.MILLIS), input.endsAt().truncatedTo(ChronoUnit.MILLIS));
         window(input.startsAt(), input.endsAt(), 366);
@@ -202,6 +225,7 @@ public class WorkforceService {
         existing = findReplay(actor, requestKey, input);
         if (existing != null) { return existing; }
         verifyDispatchFleet(fleet, driver);
+        check(order == null || order.fleetId() == driver.getFleetId(), 409, "司机不属于该订单车队");
         long vehicle = input.vehicleId();
         verifyBinding(driver, vehicle);
         var at = now();
@@ -216,7 +240,7 @@ public class WorkforceService {
                 && !mapper.taskConflict(driver.getId(), vehicle, input.startsAt(), input.endsAt(), at),
                 409, "司机或车辆已有冲突任务");
         try {
-            mapper.createTask(input, driver.getFleetId(), actor, at, requestKey);
+            mapper.createTask(input, driver.getFleetId(), actor, at, requestKey, order);
         } catch (DuplicateKeyException duplicate) {
             existing = findReplay(actor, requestKey, input);
             if (existing == null) { throw duplicate; }

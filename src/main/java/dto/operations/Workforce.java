@@ -43,7 +43,8 @@ public final class Workforce {
     public record Task(long id, long driverId, long vehicleId, long fleetId, String taskType, String description,
                        LocalDateTime startsAt, LocalDateTime endsAt, TaskStatus status, long createdBy, LocalDateTime createdAt,
                        LocalDateTime departedAt, Double departLat, Double departLon,
-                       LocalDateTime endedAt, Double endLat, Double endLon) { }
+                       LocalDateTime endedAt, Double endLat, Double endLon, Long orderId, String orderNo,
+                       String originAddress, String destinationAddress, TransportOrders.Requirement requirement) { }
     public record DutyDriver(long driverId, long fleetId, String name, Long vehicleId) { }
     public record Totals(long driverId, LocalDate start, LocalDate end, int attendedDays, int taskDays,
                          int punchDays, int lateDays, int earlyLeaveDays, int leaveDays,
