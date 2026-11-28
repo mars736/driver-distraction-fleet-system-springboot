@@ -5,20 +5,26 @@ import common.response.PageResult;
 import dto.operations.TransportOrders.*;
 import dto.operations.Workforce.TaskRequest;
 import lombok.RequiredArgsConstructor;
+import mapper.DriverSafetyRatingMapper;
 import mapper.FleetMapper;
 import mapper.OperationsRecordMapper;
 import mapper.TransportOrderMapper;
 import mapper.WorkforceMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import service.audit.OperationAction;
 import service.audit.OperationLogService;
+import service.rating.DriverSafetyRating.Level;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static dto.operations.TransportOrders.ConflictReason.*;
 import static service.operations.OperationsAccess.*;
@@ -32,6 +38,10 @@ public class TransportOrderService {
     private final FleetMapper fleets;
     private final OperationsRecordMapper records;
     private final OperationLogService audit;
+    private final DriverSafetyRatingMapper ratings;
+
+    @Value("${transport-orders.high-minimum-rating:A}")
+    private Level highMinimumRating;
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public OrderRow create(Draft input) {
@@ -58,7 +68,12 @@ public class TransportOrderService {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public TransportOrderDetail detail(long id) {
         admin();
-        return new TransportOrderDetail(load(id), tasks.orderedTasks(id));
+        var order = load(id);
+        var snapshots = orders.dispatchRatings(id).stream()
+                .collect(Collectors.toMap(DispatchRatingRow::taskId, DispatchRatingRow::rating));
+        var history = tasks.orderedTasks(id).stream()
+                .map(task -> new AssignmentHistory(task, snapshots.get(task.id()))).toList();
+        return new TransportOrderDetail(order, history);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -79,7 +94,8 @@ public class TransportOrderService {
         admin();
         var order = load(id);
         requireWaiting(order);
-        var rows = orders.candidates(order, now(), offset(page, size), size).stream().map(TransportOrderCandidate::new).toList();
+        var rows = orders.candidates(order, now(), offset(page, size), size, acceptedLevels()).stream()
+                .map(TransportOrderCandidate::new).toList();
         return PageResult.of(rows, orders.countCandidates(order.fleetId()), page, size);
     }
 
@@ -98,15 +114,12 @@ public class TransportOrderService {
             return new DispatchReceipt(id, previous.taskId(), Status.ASSIGNED, previous.expectedVersion() + 1);
         }
         requireWaiting(order, input.expectedVersion());
-        if (order.requirement() == Requirement.HIGH) {
-            throw new TransportOrderConflict(RATING_UNAVAILABLE, "高要求任务需要已发布的司机长期评级");
-        }
-
         var taskRequest = new TaskRequest(input.driverId(), input.vehicleId(), order.taskType(), order.description(),
                 order.startsAt(), order.endsAt());
         var link = new TaskLink(id, order.fleetId(), order.originAddress(), order.destinationAddress(),
                 order.requirement(), requestKey, order.version());
         var task = workforce.createOrderTask(taskRequest, link);
+        if (order.requirement() == Requirement.HIGH) { saveRatingForDispatch(task.id(), task.driverId()); }
         checkUpdated(orders.assign(id, task.id(), order.version(), now()));
         audit.success(OperationAction.TRANSPORT_ORDER_ASSIGN, id, order.fleetId(), Long.toString(task.id()));
         return new DispatchReceipt(id, task.id(), Status.ASSIGNED, order.version() + 1);
@@ -120,6 +133,27 @@ public class TransportOrderService {
         checkUpdated(orders.cancel(id, order.version(), now()));
         audit.success(OperationAction.TRANSPORT_ORDER_CANCEL, id, order.fleetId());
         return load(id);
+    }
+
+    private List<Level> acceptedLevels() {
+        return Arrays.stream(Level.values()).filter(level -> level.compareTo(highMinimumRating) <= 0).toList();
+    }
+
+    private void saveRatingForDispatch(long taskId, long driverId) {
+        // 与评级发布串行化，直到任务和评级快照一同提交。
+        ratings.lockPublicationForShare();
+        var current = ratings.currentRatings(List.of(driverId));
+        if (current.isEmpty()) {
+            throw new TransportOrderConflict(RATING_UNAVAILABLE, "高要求任务需要已发布的司机长期评级");
+        }
+        var rating = current.getFirst().view();
+        if (!acceptedLevels().contains(rating.level())) {
+            throw new TransportOrderConflict(RATING_BELOW_REQUIREMENT,
+                    "司机长期评级低于订单要求，最低为 " + highMinimumRating + " 级");
+        }
+        if (orders.saveDispatchRating(taskId, rating) != 1) {
+            throw new IllegalStateException("派发评级快照保存失败");
+        }
     }
 
     private OrderRow lock(long id) {

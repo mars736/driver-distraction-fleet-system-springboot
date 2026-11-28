@@ -1,6 +1,6 @@
 # 运输订单与派单联调
 
-本批后端支持管理员先登记订单，再指定司机及其已绑定车辆。订单派发后生成运输任务，司机 App 沿用原任务接口完成报到。初次部署旧库时，在现有迁移之后执行 `src/main/resources/db/migrations/20261128_transport_orders.sql`。接口响应使用现有 `Result` 包装。
+本批后端支持管理员先登记订单，再指定司机及其已绑定车辆。订单派发后生成运输任务，司机 App 沿用原任务接口完成报到。初次部署旧库时按 README 执行订单和长期评级迁移，再执行 `src/main/resources/db/migrations/20261128_transport_dispatch_rating.sql`。接口响应使用现有 `Result` 包装。
 
 ## 管理员 Web
 
@@ -18,7 +18,9 @@
 | `POST /{id}/assign` | 选择司机及车辆，创建运输任务 |
 | `POST /{id}/cancel` | 取消待派订单，请求带 `expectedVersion` |
 
-列表和候选读取 `data.list`、`total`、`page`、`pageSize`。候选按可选优先、司机 ID 升序排列，`eligible=false` 时禁用确认按钮。`safetyRating` 在本批响应中为空。高要求订单可建单及查看候选，确认派发时返回 `RATING_UNAVAILABLE`，等待长期评级模块提供可用结果。
+列表和候选读取 `data.list`、`total`、`page`、`pageSize`。候选按可选优先、司机 ID 升序排列，`eligible=false` 时禁用确认按钮。候选的 `safetyRating` 与司机档案使用同一份最新已发布结果，包括批次 UUID `batchId`、分数 `score`、等级 `level`、数据截止时间 `dataAsOf`、发布时间 `publishedAt` 和 `hasDrivingHistory`。无结果时该字段为空。
+
+高要求订单在原在岗、车队、车辆和时段规则之上校验长期评级，默认最低 A 级，即 S、A 可选。后端配置 `transport-orders.high-minimum-rating` 可调整门槛。`hasDrivingHistory` 供管理员参考。普通订单展示评级，候选资格由原派单规则决定。
 
 建单示例：
 
@@ -47,7 +49,7 @@
 }
 ```
 
-成功返回 `orderId`、`taskId`、`status` 和 `version`。收到响应后刷新订单详情。即使原任务后来取消或已经重派，同一请求的重放仍返回当次派发结果。
+成功返回 `orderId`、`taskId`、`status` 和 `version`。确认高要求订单时，后端读取当时最新发布的评级，在同一事务中保存任务与评级快照。收到响应后刷新订单详情，在对应 `assignments[].safetyRating` 查看当时使用的评级。普通订单及历史未留评级的任务该字段为空。即使后来重新评级、取消或重派，同一请求的重放仍返回当次派发结果，已保存的快照继续用于回看。
 
 | 订单状态 | 操作 |
 |---|---|
@@ -65,7 +67,8 @@ HTTP 409 时检查 `data.reason`：
 | `ORDER_VERSION_CONFLICT`、`ORDER_NOT_DISPATCHABLE` | 刷新订单，重新核对状态 |
 | `ORDER_REQUEST_KEY_REUSED` | 核对原派发结果，新的派发使用新标识 |
 | `DRIVER_NOT_ELIGIBLE` | 查看消息并刷新候选，重新选司机与车辆 |
-| `RATING_UNAVAILABLE` | 提示暂无已发布长期评级 |
+| `RATING_UNAVAILABLE` | 提示该司机暂无已发布长期评级，刷新候选后重新选择 |
+| `RATING_BELOW_REQUIREMENT` | 提示该司机评级低于订单门槛，刷新候选后重新选择 |
 
 ## 司机 App
 

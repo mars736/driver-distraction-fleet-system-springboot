@@ -11,6 +11,7 @@ import java.util.List;
 @Mapper
 public interface DriverSafetyRatingMapper {
     Integer lockControl();
+    Integer lockPublicationForShare();
     Batch active();
     Batch find(@Param("id") String id);
     boolean hasWeek(@Param("week") LocalDate week);

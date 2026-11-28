@@ -44,7 +44,7 @@ YARN 第一步按告警 ID 选截止前最新版本，第二步按司机汇总�
 | 查批次 | GET /api/operations/driver-safety-rating/batches/{id} | 返回 dataAsOf、publishedAt、stage1ApplicationId、stage2ApplicationId、ruleVersion 和错误说明 |
 | 司机档案 | GET /api/drivers 和 GET /api/drivers/{id} | 已发布结果在 safetyRating 中，字段含 batchId、score、level、dataAsOf、publishedAt、hasDrivingHistory |
 
-批次状态为 PENDING、RUNNING、PUBLISHED、FAILED。字段 safetyRating 缺失时页面显示「暂无评级」，hasDrivingHistory 为 false 时可提示「暂无驾驶记录」。现有月度评分继续由 /api/scores 提供。高要求订单准入在后续批次接入。
+批次状态为 PENDING、RUNNING、PUBLISHED、FAILED。字段 safetyRating 缺失时页面显示「暂无评级」，hasDrivingHistory 为 false 时可提示「暂无驾驶记录」。现有月度评分继续由 /api/scores 提供。高要求订单的评级准入及确认规则见 [运输订单与派单联调](transport-orders.md)。
 
 ## 验收
 

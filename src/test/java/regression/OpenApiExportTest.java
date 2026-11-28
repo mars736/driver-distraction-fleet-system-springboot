@@ -73,6 +73,13 @@ class OpenApiExportTest {
                 .isTrue();
         assertThat(assignment.at("/responses/409/content/application~1json/examples/RATING_UNAVAILABLE/value/data/reason")
                 .asText()).isEqualTo("RATING_UNAVAILABLE");
+        assertThat(assignment.at("/responses/409/content/application~1json/examples/RATING_BELOW_REQUIREMENT/value/data/reason")
+                .asText()).isEqualTo("RATING_BELOW_REQUIREMENT");
+        assertThat(spec.at("/components/schemas/TransportOrderCandidate/properties/safetyRating/$ref").asText())
+                .isEqualTo("#/components/schemas/SafetyRatingView");
+        assertThat(spec.at("/components/schemas/AssignmentHistory/properties/id").isObject()).isTrue();
+        assertThat(spec.at("/components/schemas/AssignmentHistory/properties/safetyRating/$ref").asText())
+                .isEqualTo("#/components/schemas/SafetyRatingView");
         var shifts = spec.path("paths").path("/api/operations/workforce/shifts").path("put");
         var shiftExamples = shifts.at("/requestBody/content/application~1json/examples");
         assertThat(shiftExamples.at("/create/value/expectedVersion").asLong(-1)).isZero();
@@ -128,7 +135,9 @@ class OpenApiExportTest {
         nullableFields(schemas, "TransportOrderDetail", "taskId", "driverId", "vehicleId");
         nullableFields(schemas, "TransportOrderCandidate", "vehicleId", "plateNo", "unavailableReason");
         ((ObjectNode) schemas.at("/TransportOrderCandidate/properties/unavailableReason")).withArrayProperty("enum").addNull();
-        ((ObjectNode) schemas.path("SafetyRating")).put("nullable", true);
+        nullableFields(schemas, "TransportOrderCandidate", "safetyRating");
+        nullableFields(schemas, "AssignmentHistory", "safetyRating", "orderId", "orderNo", "originAddress",
+                "destinationAddress");
 
         var paths = spec.withObjectProperty("paths");
         paths.properties().forEach(path -> path.getValue().properties().forEach(method -> {
@@ -232,6 +241,7 @@ class OpenApiExportTest {
                 "ORDER_NOT_DISPATCHABLE", "订单当前不在待派单状态",
                 "ORDER_REQUEST_KEY_REUSED", "请求标识已用于不同派发条件",
                 "RATING_UNAVAILABLE", "高要求任务需要已发布的司机长期评级",
+                "RATING_BELOW_REQUIREMENT", "司机长期评级低于订单要求，最低为 A 级",
                 "DRIVER_NOT_ELIGIBLE", "司机或车辆已有冲突任务"), null));
 
         var orderStateConflict = conflict("订单状态或版本已变化", Map.of(
@@ -240,7 +250,8 @@ class OpenApiExportTest {
         ((ObjectNode) paths.path(root + "/{id}").path("put").path("responses")).set("409", orderStateConflict);
         ((ObjectNode) paths.path(root + "/{id}/cancel").path("post").path("responses"))
                 .set("409", orderStateConflict.deepCopy());
-        detail(paths, root + "/{id}/assign", "post", "重试同一派发使用相同 Idempotency-Key 和请求内容。");
+        detail(paths, root + "/{id}/assign", "post",
+                "高要求订单以确认时的最新已发布评级为准。成功后订单详情保留派发评级。重试使用原 Idempotency-Key 和原请求。");
     }
 
     private static void shiftContract(ObjectNode operation) {
