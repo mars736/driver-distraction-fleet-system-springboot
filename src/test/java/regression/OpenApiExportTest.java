@@ -88,6 +88,11 @@ class OpenApiExportTest {
         assertThat(spec.at("/paths/~1api~1alerts~1{id}~1key-frame/get/responses/200/content/image~1jpeg/schema/format")
                 .asText()).isEqualTo("binary");
 
+        var rating = operations.path("/api/operations/driver-safety-rating/batches").path("post");
+        assertThat(rating.at("/responses/202/content/application~1json/schema").isObject()).isTrue();
+        assertThat(spec.at("/components/schemas/User/properties/safetyRating/$ref").asText())
+                .isEqualTo("#/components/schemas/SafetyRatingView");
+
         Path output = Path.of(System.getenv("DRIVER_FLEET_OPENAPI_OUTPUT"));
         Files.createDirectories(output);
         String content = json.writerWithDefaultPrettyPrinter().writeValueAsString(spec).replace("\r\n", "\n") + "\n";
@@ -155,6 +160,11 @@ class OpenApiExportTest {
         responses(paths, "/api/alerts/{id}/reviews", "post", "409", "PENDING_APPEAL / ALREADY_REVIEWED");
         responses(paths, "/api/appeals/{id}/decision", "post", "409", "APPEAL_WITHDRAWN / APPEAL_ALREADY_REVIEWED / ALERT_STATUS_CHANGED");
         responses(paths, "/api/operations/certificates", "put", "409", "证照已新增或版本已变更");
+        responses(paths, "/api/operations/driver-safety-rating/batches", "post", "409", "已有批次正在运行");
+        responses(paths, "/api/operations/driver-safety-rating/batches", "post", "503", "长期安全评级未启用");
+        responses(paths, "/api/operations/driver-safety-rating/batches/{id}", "get", "404", "评级批次不存在");
+        detail(paths, "/api/operations/driver-safety-rating/batches", "post",
+                "平台管理员手动触发长期评级。202 表示受理，状态达到 PUBLISHED 后刷新司机档案。");
         responses(paths, "/api/operations/fleet/fuel/{id}", "put", "409", "加油记录版本已变更或已作废");
         responses(paths, "/api/vehicles/{id}/track", "get", "422", "轨迹点过多，请缩小范围");
         detail(paths, "/api/operations/workforce/shifts", "put",

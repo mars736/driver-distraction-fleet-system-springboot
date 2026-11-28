@@ -14,6 +14,7 @@ import mapper.FleetMapper;
 import mapper.UserMapper;
 import mapper.WorkforceMapper;
 import org.springframework.dao.DuplicateKeyException;
+import service.rating.DriverSafetyRatingStore;
 import service.vehicle.DriverVehicleBindingGuard;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -40,6 +41,7 @@ public class DriverService {
     private final DriverVehicleBindingGuard bindings;
     private final PasswordEncoder passwordEncoder;
     private final OperationLogService audit;
+    private final DriverSafetyRatingStore ratings;
 
     public PageResult<User> list(Long fleetId, String keyword, Integer page, Integer pageSize) {
         int currentPage = (page == null || page < 1) ? 1 : page;
@@ -47,6 +49,7 @@ public class DriverService {
         int offset = (currentPage - 1) * size;
 
         List<User> list = userMapper.listDrivers(fleetId, keyword, offset, size);
+        ratings.attach(list);
         long total = userMapper.countDrivers(fleetId, keyword);
         return PageResult.of(list, total, currentPage, size);
     }
@@ -56,6 +59,7 @@ public class DriverService {
         if (user == null || !CommonConstant.ROLE_DRIVER.equals(user.getRole())) {
             throw new BusinessException(404, "司机不存在");
         }
+        ratings.attach(List.of(user));
         return user;
     }
 

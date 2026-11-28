@@ -4431,6 +4431,75 @@
         }
       }
     },
+    "/api/operations/driver-safety-rating/batches" : {
+      "post" : {
+        "tags" : [ "driver-safety-rating-controller" ],
+        "operationId" : "start_1",
+        "responses" : {
+          "202" : {
+            "description" : "Accepted",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ResultSafetyRatingBatchView"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "未登录或令牌失效",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "权限不足",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "业务或请求错误，使用 code、message、data 响应",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "409" : {
+            "description" : "已有批次正在运行",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "503" : {
+            "description" : "长期安全评级未启用",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          }
+        },
+        "description" : "平台管理员手动触发长期评级。202 表示受理，状态达到 PUBLISHED 后刷新司机档案。"
+      }
+    },
     "/api/fleets" : {
       "get" : {
         "tags" : [ "fleet-controller" ],
@@ -8196,6 +8265,73 @@
         }
       }
     },
+    "/api/operations/driver-safety-rating/batches/{id}" : {
+      "get" : {
+        "tags" : [ "driver-safety-rating-controller" ],
+        "operationId" : "get_4",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ResultSafetyRatingBatchView"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "未登录或令牌失效",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "权限不足",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "业务或请求错误，使用 code、message、data 响应",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "评级批次不存在",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/operation-logs" : {
       "get" : {
         "tags" : [ "operation-log-controller" ],
@@ -10029,6 +10165,32 @@
           }
         }
       },
+      "SafetyRatingView" : {
+        "type" : "object",
+        "properties" : {
+          "batchId" : {
+            "type" : "string"
+          },
+          "score" : {
+            "type" : "number"
+          },
+          "level" : {
+            "type" : "string",
+            "enum" : [ "S", "A", "B", "C", "D" ]
+          },
+          "dataAsOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "publishedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "hasDrivingHistory" : {
+            "type" : "boolean"
+          }
+        }
+      },
       "User" : {
         "type" : "object",
         "properties" : {
@@ -10077,6 +10239,9 @@
           "updateTime" : {
             "type" : "string",
             "format" : "date-time"
+          },
+          "safetyRating" : {
+            "$ref" : "#/components/schemas/SafetyRatingView"
           }
         }
       },
@@ -11379,6 +11544,53 @@
           "reason" : {
             "maxLength" : 300,
             "minLength" : 0,
+            "type" : "string"
+          }
+        }
+      },
+      "ResultSafetyRatingBatchView" : {
+        "type" : "object",
+        "properties" : {
+          "code" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "data" : {
+            "$ref" : "#/components/schemas/SafetyRatingBatchView"
+          }
+        }
+      },
+      "SafetyRatingBatchView" : {
+        "type" : "object",
+        "properties" : {
+          "batchId" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "RUNNING", "PUBLISHED", "FAILED" ]
+          },
+          "dataAsOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "publishedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "stage1ApplicationId" : {
+            "type" : "string"
+          },
+          "stage2ApplicationId" : {
+            "type" : "string"
+          },
+          "errorMessage" : {
+            "type" : "string"
+          },
+          "ruleVersion" : {
             "type" : "string"
           }
         }

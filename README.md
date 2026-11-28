@@ -12,7 +12,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    USE driver_fleet;
    ```
 
-   新库执行 `src/main/resources/db/schema.sql`，创建四十二张业务表。已有申诉模块的数据库按顺序执行以下迁移。更旧的数据库先执行告警复核及申诉迁移。应用启动时不会自动执行这些脚本。
+   新库执行 `src/main/resources/db/schema.sql`，创建四十七张业务表。已有申诉模块的数据库按顺序执行以下迁移。更旧的数据库先执行告警复核及申诉迁移。应用启动时不会自动执行这些脚本。
 
    - `src/main/resources/db/migrations/20261119_vehicle_telemetry.sql`
    - `src/main/resources/db/migrations/20261120_alert_key_frame_timeline.sql`
@@ -36,6 +36,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    - `src/main/resources/db/migrations/20261128_transport_orders.sql`
    - `src/main/resources/db/migrations/20261128_alert_hdfs_archive.sql`
    - `src/main/resources/db/migrations/20261128_alert_video_evidence.sql`
+   - `src/main/resources/db/migrations/20261128_driver_safety_rating.sql`
 
    执行运输订单迁移前，旧库可用以下查询找出缺少关联档案的数据。若有结果，先核对并修复归属，再执行迁移。
 
@@ -94,6 +95,8 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
 违规处置支持自动建单、手动与就近派发、工单关闭和人员建议审核。参见 [违规处置工单联调](docs/violation-dispatch.md)。
 
 告警元数据可通过事务归档队列同步到 HDFS，见 [告警 HDFS 归档联调](docs/alert-hdfs-archive.md)。管理员可在告警申诉中查看归档视频，见 [告警视频证据联调](docs/alert-video-evidence.md)。
+
+司机档案支持显示 Hadoop 每周计算的长期安全评级，详见 [长期安全评级部署与联调](docs/driver-safety-rating.md)。
 
 ## 接口文档
 

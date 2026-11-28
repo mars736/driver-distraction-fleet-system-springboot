@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="mapper.DriverSafetyRatingMapper">
+    <select id="lockControl" resultType="int">
+        SELECT id FROM driver_safety_rating_control WHERE id=1 FOR UPDATE
+    </select>
+    <select id="active" resultType="service.rating.DriverSafetyRating$Batch">
+        SELECT b.* FROM driver_safety_rating_control c JOIN driver_safety_rating_batch b ON b.id=c.active_batch_id
+        WHERE c.id=1
+    </select>
+    <select id="find" resultType="service.rating.DriverSafetyRating$Batch">
+        SELECT * FROM driver_safety_rating_batch WHERE id=#{id}
+    </select>
+    <select id="hasWeek" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM driver_safety_rating_batch WHERE week_key=#{week})
+    </select>
+    <insert id="create">
+        INSERT INTO driver_safety_rating_batch(id,status,week_key,data_as_of) VALUES(#{id},'PENDING',#{week},#{at})
+    </insert>
+    <update id="setActive">
+        UPDATE driver_safety_rating_control SET active_batch_id=#{id} WHERE id=1
+    </update>
+    <select id="backfillComplete" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM alert_archive_backfill WHERE id=1 AND last_id=through_id)
+    </select>
+    <sql id="archiveCutoff">
+        o.captured_at&lt;=#{cutoff} AND (o.revision=0 OR o.recorded_at&lt;=#{cutoff})
+    </sql>
+    <select id="hasPendingArchive" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM alert_archive_outbox o LEFT JOIN alert_archive_batch b ON b.id=o.batch_id
+        WHERE <include refid="archiveCutoff"/> AND b.synced_at IS NULL)
+    </select>
+    <select id="rosterAt" resultType="service.rating.DriverSafetyRating$Roster">
+        SELECT u.id AS driver_id,u.create_time AS registered_at,
+            EXISTS(SELECT 1 FROM transport_task t WHERE t.driver_id=u.id AND t.status='COMPLETED'
+                AND t.ended_at BETWEEN u.create_time AND #{cutoff}) AS has_driving_history
+        FROM sys_user u WHERE u.role='DRIVER' AND u.create_time&lt;=#{cutoff} ORDER BY u.id
+    </select>
+    <select id="archivedFiles" resultType="service.rating.DriverSafetyRating$ArchiveFile">
+        SELECT DISTINCT b.id,b.partition_date FROM alert_archive_outbox o JOIN alert_archive_batch b ON b.id=o.batch_id
+        WHERE <include refid="archiveCutoff"/> AND b.synced_at IS NOT NULL ORDER BY b.partition_date,b.id
+    </select>
+    <insert id="saveRoster">
+        INSERT INTO driver_safety_rating_roster(batch_id,driver_id,registered_at,has_driving_history) VALUES
+        <foreach collection="rows" item="r" separator=",">
+            (#{id},#{r.driverId},#{r.registeredAt},#{r.hasDrivingHistory})
+        </foreach>
+    </insert>
+    <insert id="saveFiles">
+        INSERT INTO driver_safety_rating_input(batch_id,archive_id,partition_date) VALUES
+        <foreach collection="rows" item="f" separator=",">
+            (#{id},#{f.id},#{f.partitionDate})
+        </foreach>
+    </insert>
+    <update id="freeze">
+        UPDATE driver_safety_rating_batch SET frozen_at=#{at} WHERE id=#{id}
+    </update>
+    <select id="loadRoster" resultType="service.rating.DriverSafetyRating$Roster">
+        SELECT driver_id,registered_at,has_driving_history FROM driver_safety_rating_roster
+        WHERE batch_id=#{id} ORDER BY driver_id
+    </select>
+    <select id="loadFiles" resultType="service.rating.DriverSafetyRating$ArchiveFile">
+        SELECT archive_id AS id,partition_date FROM driver_safety_rating_input
+        WHERE batch_id=#{id} ORDER BY partition_date,archive_id
+    </select>
+    <update id="running">
+        UPDATE driver_safety_rating_batch SET status='RUNNING' WHERE id=#{id} AND status='PENDING'
+    </update>
+    <update id="progress">
+        UPDATE driver_safety_rating_batch
+        SET stage1_application_id=COALESCE(#{one},stage1_application_id),
+            stage2_application_id=COALESCE(#{two},stage2_application_id)
+        WHERE id=#{id} AND status='RUNNING'
+    </update>
+    <insert id="saveResults">
+        INSERT INTO driver_safety_rating_result(batch_id,driver_id,event_count,score,level,has_driving_history) VALUES
+        <foreach collection="rows" item="r" separator=",">
+            (#{id},#{r.driverId},#{r.eventCount},#{r.score},#{r.level},#{r.hasDrivingHistory})
+        </foreach>
+    </insert>
+    <update id="published">
+        UPDATE driver_safety_rating_batch SET status='PUBLISHED',published_at=#{at} WHERE id=#{id}
+    </update>
+    <update id="setPublished">
+        UPDATE driver_safety_rating_control SET published_batch_id=#{id},active_batch_id=NULL WHERE id=1
+    </update>
+    <update id="failed">
+        UPDATE driver_safety_rating_batch SET status='FAILED',error_message=#{message} WHERE id=#{id}
+    </update>
+    <select id="currentRatings" resultType="service.rating.DriverSafetyRating$DriverView">
+        SELECT r.driver_id,r.batch_id,r.score,r.level,b.data_as_of,b.published_at,r.has_driving_history
+        FROM driver_safety_rating_control c JOIN driver_safety_rating_result r ON r.batch_id=c.published_batch_id
+            JOIN driver_safety_rating_batch b ON b.id=r.batch_id
+        WHERE c.id=1 AND r.driver_id IN
+        <foreach collection="drivers" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </select>
+</mapper>
