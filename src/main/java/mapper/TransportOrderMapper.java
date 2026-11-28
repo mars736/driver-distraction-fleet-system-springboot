@@ -3,6 +3,8 @@ package mapper;
 import dto.operations.TransportOrders.*;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import service.rating.DriverSafetyRating.Level;
+import service.rating.DriverSafetyRating.SafetyRatingView;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -34,7 +36,12 @@ public interface TransportOrderMapper {
     Replay replay(@Param("orderId") long orderId, @Param("requestKey") String requestKey);
 
     List<CandidateRow> candidates(@Param("order") OrderRow order, @Param("at") LocalDateTime at,
-                                  @Param("offset") long offset, @Param("size") int size);
+                                  @Param("offset") long offset, @Param("size") int size,
+                                  @Param("acceptedLevels") List<Level> acceptedLevels);
+
+    int saveDispatchRating(@Param("taskId") long taskId, @Param("rating") SafetyRatingView rating);
+
+    List<DispatchRatingRow> dispatchRatings(@Param("orderId") long orderId);
 
     long countCandidates(@Param("fleetId") long fleetId);
 }

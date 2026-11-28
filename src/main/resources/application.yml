@@ -21,6 +21,9 @@ infer:
 driver-safety-rating:
   enabled: ${DRIVER_SAFETY_RATING_ENABLED:false}
 
+transport-orders:
+  high-minimum-rating: ${TRANSPORT_ORDER_HIGH_MINIMUM_RATING:A}
+
 video:
   ffmpeg-path: ffmpeg
   evidence:

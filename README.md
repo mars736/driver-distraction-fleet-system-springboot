@@ -12,7 +12,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    USE driver_fleet;
    ```
 
-   新库执行 `src/main/resources/db/schema.sql`，创建四十七张业务表。已有申诉模块的数据库按顺序执行以下迁移。更旧的数据库先执行告警复核及申诉迁移。应用启动时不会自动执行这些脚本。
+   新库执行 `src/main/resources/db/schema.sql`，创建四十八张业务表。已有申诉模块的数据库按顺序执行以下迁移。更旧的数据库先执行告警复核及申诉迁移。应用启动时不会自动执行这些脚本。
 
    - `src/main/resources/db/migrations/20261119_vehicle_telemetry.sql`
    - `src/main/resources/db/migrations/20261120_alert_key_frame_timeline.sql`
@@ -37,6 +37,7 @@ Spring Boot 3.5.3 / Java 21 / MyBatis / MySQL。当前提供认证、车队、�
    - `src/main/resources/db/migrations/20261128_alert_hdfs_archive.sql`
    - `src/main/resources/db/migrations/20261128_alert_video_evidence.sql`
    - `src/main/resources/db/migrations/20261128_driver_safety_rating.sql`
+   - `src/main/resources/db/migrations/20261128_transport_dispatch_rating.sql`
 
    执行运输订单迁移前，旧库可用以下查询找出缺少关联档案的数据。若有结果，先核对并修复归属，再执行迁移。
 

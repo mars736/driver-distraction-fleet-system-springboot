@@ -95,13 +95,32 @@
                         AND (t.status='RUNNING' OR (t.status='PENDING'
                              AND t.starts_at&lt;#{order.endsAt} AND t.ends_at&gt;#{order.startsAt})))
                 THEN 'DRIVER_NOT_ELIGIBLE'
-                WHEN #{order.requirement}='HIGH' THEN 'RATING_UNAVAILABLE'
+                WHEN #{order.requirement}='HIGH' AND r.batch_id IS NULL THEN 'RATING_UNAVAILABLE'
+                WHEN #{order.requirement}='HIGH' AND r.level NOT IN
+                    <foreach collection="acceptedLevels" item="level" open="(" separator="," close=")">#{level}</foreach>
+                THEN 'RATING_BELOW_REQUIREMENT'
                 ELSE NULL
-            END AS unavailable_reason
+            END AS unavailable_reason,
+            r.batch_id,r.score,r.level,b.data_as_of,b.published_at,r.has_driving_history
         FROM sys_user u JOIN fleet f ON f.id=u.fleet_id
         LEFT JOIN vehicle v ON v.id=u.vehicle_id AND v.fleet_id=u.fleet_id
+        LEFT JOIN driver_safety_rating_control c ON c.id=1
+        LEFT JOIN driver_safety_rating_batch b ON b.id=c.published_batch_id AND b.status='PUBLISHED'
+        LEFT JOIN driver_safety_rating_result r ON r.batch_id=b.id AND r.driver_id=u.id
         WHERE u.role='DRIVER' AND u.fleet_id=#{order.fleetId}
         ORDER BY unavailable_reason IS NOT NULL,driver_id LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <insert id="saveDispatchRating">
+        INSERT INTO transport_task_dispatch_rating(task_id,batch_id,score,level,data_as_of,published_at,has_driving_history)
+        VALUES(#{taskId},#{rating.batchId},#{rating.score},#{rating.level},#{rating.dataAsOf},
+               #{rating.publishedAt},#{rating.hasDrivingHistory})
+    </insert>
+
+    <select id="dispatchRatings" resultType="dto.operations.TransportOrders$DispatchRatingRow">
+        SELECT r.task_id,r.batch_id,r.score,r.level,r.data_as_of,r.published_at,r.has_driving_history
+        FROM transport_task_dispatch_rating r JOIN transport_task t ON t.id=r.task_id
+        WHERE t.transport_order_id=#{orderId}
     </select>
 
     <select id="countCandidates" resultType="long">

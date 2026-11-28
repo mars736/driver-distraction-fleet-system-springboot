@@ -16,6 +16,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 import service.operations.OperationsReminderService;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -531,6 +532,89 @@ class FleetOperationsIntegrationTest {
         assertThat(call(HttpMethod.GET, overlapPath, admin, null, 200).path("assignments")).isEmpty();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM transport_task WHERE transport_order_id=?", Long.class, orderId))
                 .isEqualTo(1);
+    }
+
+    @Test
+    void highOrderUsesTheRatingAtConfirmationAndKeepsEachDispatchSnapshot() throws Exception {
+        prepareOnDuty();
+        String original = jdbc.queryForObject(
+                "SELECT published_batch_id FROM driver_safety_rating_control WHERE id=1", String.class);
+        var ratingBatches = new java.util.ArrayList<String>();
+        try {
+            String firstRating = publishDispatchRating(ratingBatches, "85.0", "A");
+            long orderId = id(call(HttpMethod.POST, ORDERS, admin, orderBody("HIGH", "仓库 A", "仓库 B"), 200));
+            String path = ORDERS + "/" + orderId;
+            var request = Map.of("driverId", driver, "vehicleId", vehicle, "expectedVersion", 1);
+            var preview = call(HttpMethod.GET, path + "/candidates?pageSize=1", admin, null, 200)
+                    .path("list").get(0);
+            assertThat(preview.path("eligible").asBoolean()).isTrue();
+            assertThat(preview.path("safetyRating").path("batchId").asText()).isEqualTo(firstRating);
+            assertThat(preview.path("safetyRating").path("level").asText()).isEqualTo("A");
+
+            String lowerRating = publishDispatchRating(ratingBatches, "84.9", "B");
+            var downgraded = call(HttpMethod.GET, path + "/candidates", admin, null, 200).path("list").get(0);
+            assertThat(downgraded.path("safetyRating").path("batchId").asText()).isEqualTo(lowerRating);
+            assertThat(downgraded.path("unavailableReason").asText()).isEqualTo("RATING_BELOW_REQUIREMENT");
+            assertThat(orderAssign(path, admin, request, "rated-first", 409).path("reason").asText())
+                    .isEqualTo("RATING_BELOW_REQUIREMENT");
+            var unassigned = call(HttpMethod.GET, path, admin, null, 200);
+            assertThat(unassigned.path("version").asLong()).isEqualTo(1);
+            assertThat(unassigned.path("assignments")).isEmpty();
+
+            String normal = ORDERS + "/" + id(call(HttpMethod.POST, ORDERS, admin, orderBody("NORMAL", "仓库 A", "仓库 C"), 200));
+            assertThat(call(HttpMethod.GET, normal + "/candidates", admin, null, 200).path("list").get(0)
+                    .path("eligible").asBoolean()).isTrue();
+
+            selectRating(firstRating);
+            var first = orderAssign(path, admin, request, "rated-first", 200);
+            long firstTask = first.path("taskId").asLong();
+            var taskPath = WORK + "/tasks/" + firstTask;
+            assertThat(call(HttpMethod.GET, taskPath, driver, null, 200).has("safetyRating")).isFalse();
+            selectRating(lowerRating);
+            assertThat(orderAssign(path, admin, request, "rated-first", 200)).isEqualTo(first);
+            call(HttpMethod.POST, taskPath + "/cancel", admin, null, 200);
+            var secondRequest = Map.of("driverId", driver, "vehicleId", vehicle, "expectedVersion", 2);
+            assertThat(orderAssign(path, admin, secondRequest, "rated-second", 409).path("reason").asText())
+                    .isEqualTo("RATING_BELOW_REQUIREMENT");
+
+            String topRating = publishDispatchRating(ratingBatches, "97.0", "S");
+            long secondTask = orderAssign(path, admin, secondRequest, "rated-second", 200).path("taskId").asLong();
+            var history = call(HttpMethod.GET, path, admin, null, 200).path("assignments");
+            assertThat(history).hasSize(2);
+            assertThat(history.get(0).path("id").asLong()).isEqualTo(secondTask);
+            assertThat(history.get(0).path("safetyRating").path("batchId").asText()).isEqualTo(topRating);
+            assertThat(history.get(0).path("safetyRating").path("score").asDouble()).isEqualTo(97.0);
+            assertThat(history.get(1).path("id").asLong()).isEqualTo(firstTask);
+            assertThat(history.get(1).path("status").asText()).isEqualTo("CANCELED");
+            assertThat(history.get(1).path("safetyRating").path("batchId").asText()).isEqualTo(firstRating);
+            assertThat(history.get(1).path("safetyRating").path("level").asText()).isEqualTo("A");
+            assertThat(jdbc.queryForObject("SELECT score FROM transport_task_dispatch_rating WHERE task_id=?",
+                    BigDecimal.class, firstTask)).isEqualByComparingTo("85.0");
+            assertThat(orderAssign(path, admin, request, "rated-first", 200)).isEqualTo(first);
+        } finally {
+            selectRating(original);
+            for (String batch : ratingBatches) {
+                jdbc.update("DELETE FROM driver_safety_rating_result WHERE batch_id=?", batch);
+                jdbc.update("DELETE FROM driver_safety_rating_batch WHERE id=?", batch);
+            }
+        }
+    }
+
+    private String publishDispatchRating(List<String> batches, String score, String level) {
+        String batch = UUID.randomUUID().toString();
+        batches.add(batch);
+        jdbc.update("INSERT INTO driver_safety_rating_batch(id,status,data_as_of,published_at) VALUES(?,'PUBLISHED',?,?)",
+                batch, now.minusHours(1), now);
+        jdbc.update("""
+                INSERT INTO driver_safety_rating_result(batch_id,driver_id,event_count,score,level,has_driving_history)
+                VALUES(?,?,2,?,?,1)
+                """, batch, driver, new BigDecimal(score), level);
+        selectRating(batch);
+        return batch;
+    }
+
+    private void selectRating(String batch) {
+        jdbc.update("UPDATE driver_safety_rating_control SET published_batch_id=? WHERE id=1", batch);
     }
 
     private Map<String, Object> orderBody(String requirement, String originAddress, String destinationAddress) {
